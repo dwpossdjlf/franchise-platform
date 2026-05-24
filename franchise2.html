@@ -1,0 +1,1530 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>가맹점 소통 플랫폼</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+  <style>
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
+    .line-clamp-2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+    .sidebar-fixed{min-height:100vh;}
+    @media(max-width:768px){.sidebar-fixed{min-height:auto;}}
+    .chat-scroll{overflow-y:auto;scroll-behavior:smooth;}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useMemo, useRef, useEffect } = React;
+
+/* ══════════ FIREBASE ══════════ */
+const firebaseConfig = {
+  apiKey: "AIzaSyCsihoaD26qkRGy6Wvy4mQqXSRLSiFKzaw",
+  authDomain: "manage-7379c.firebaseapp.com",
+  projectId: "manage-7379c",
+  storageBucket: "manage-7379c.firebasestorage.app",
+  messagingSenderId: "861747832392",
+  appId: "1:861747832392:web:cd4d71d0fb04f2d3eb1a7d"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+async function seedIfEmpty() {
+  try {
+    const snap = await db.collection('brands').limit(1).get();
+    if (!snap.empty) return;
+    const b1 = db.batch();
+    INITIAL_BRANDS.forEach(b => b1.set(db.collection('brands').doc(b.id), b));
+    INITIAL_USERS.forEach(u => b1.set(db.collection('users').doc(String(u.id)), u));
+    await b1.commit();
+    const b2 = db.batch();
+    INITIAL_POSTS.forEach(p => b2.set(db.collection('posts').doc(String(p.id)), p));
+    INITIAL_NOTICES.forEach(n => b2.set(db.collection('notices').doc(String(n.id)), n));
+    INITIAL_EVENTS.forEach(e => b2.set(db.collection('events').doc(String(e.id)), e));
+    await b2.commit();
+    const b3 = db.batch();
+    INITIAL_ORDERS.forEach(o => b3.set(db.collection('orders').doc(String(o.id)), o));
+    INITIAL_MESSAGES.forEach(m => b3.set(db.collection('messages').doc(String(m.id)), m));
+    INITIAL_FR_MESSAGES.forEach(m => b3.set(db.collection('frMessages').doc(String(m.id)), m));
+    await b3.commit();
+    console.log('✅ 시드 데이터 완료');
+  } catch(e) {
+    console.error('Seed/Firebase 오류:', e);
+  }
+}
+
+/* ══════════ CONSTANTS ══════════ */
+const HQ_COLOR = '#1e3a5f';
+const FR_COLOR = '#2e7d32';
+const ADMIN_COLOR = '#1e293b';
+const CATEGORIES = ['운영','메뉴','마케팅','기타'];
+const CAT_COLORS = {'운영':'#3b82f6','메뉴':'#f59e0b','마케팅':'#ec4899','기타':'#6b7280'};
+const EVENT_TYPES = {
+  education:{label:'교육',color:'#1d4ed8',bg:'#dbeafe',icon:'📚'},
+  event:    {label:'행사',color:'#9d174d',bg:'#fce7f3',icon:'🎉'},
+  meeting:  {label:'미팅',color:'#92400e',bg:'#fef3c7',icon:'🤝'},
+};
+const ORDER_STATUS_STYLE = {
+  '검토중':{color:'#92400e',bg:'#fef3c7'},
+  '승인':  {color:'#1e40af',bg:'#dbeafe'},
+  '배송중':{color:'#5b21b6',bg:'#ede9fe'},
+  '완료':  {color:'#166534',bg:'#dcfce7'},
+  '거절':  {color:'#991b1b',bg:'#fee2e2'},
+};
+
+/* ══════════ SEED DATA ══════════ */
+const ADMIN_CRED = {id:'admin', password:'admin2026'};
+
+const INITIAL_BRANDS = [
+  {id:'starbuckskr', password:'star123', hqId:'starbucks', hqPassword:'sbux2026', name:'스타벅스', icon:'☕'},
+  {id:'parisbaguette', password:'paris123', hqId:'paris', hqPassword:'paris2026', name:'파리바게트', icon:'🥐'},
+];
+
+const INITIAL_USERS = [
+  {id:1,role:'franchise',name:'김철수',email:'gangnam@store.com',password:'store123',storeName:'강남점',brandId:'starbuckskr'},
+  {id:2,role:'franchise',name:'이영희',email:'hongdae@store.com',password:'store123',storeName:'홍대점',brandId:'starbuckskr'},
+  {id:3,role:'franchise',name:'박민준',email:'sinchon@store.com',password:'store123',storeName:'신촌점',brandId:'starbuckskr'},
+  {id:4,role:'franchise',name:'최수진',email:'gangbuk@paris.com',password:'paris123',storeName:'강북점',brandId:'parisbaguette'},
+  {id:5,role:'franchise',name:'정민호',email:'mapo@paris.com',password:'paris123',storeName:'마포점',brandId:'parisbaguette'},
+];
+
+const INITIAL_POSTS = [
+  {id:1,userId:1,storeName:'강남점',authorName:'김철수',brandId:'starbuckskr',title:'여름 시즌 음료 메뉴 추가 요청',body:'아이스 음료 메뉴 추가를 요청드립니다. 스무디 종류를 늘려주시면 매출에 도움이 될 것 같습니다.',category:'메뉴',status:'완료',date:'2026-05-10',attachments:[],response:'아이스 음료 3종을 6월 1일부터 추가할 예정입니다.',responseDate:'2026-05-13',responseAttachments:[]},
+  {id:2,userId:2,storeName:'홍대점',authorName:'이영희',brandId:'starbuckskr',title:'주말 운영 시간 연장 승인 요청',body:'주말 저녁 유동인구가 많아 오후 11시까지 연장하고 싶습니다.',category:'운영',status:'검토중',date:'2026-05-18',attachments:[],response:null,responseDate:null,responseAttachments:[]},
+  {id:3,userId:3,storeName:'신촌점',authorName:'박민준',brandId:'starbuckskr',title:'대학생 할인 이벤트 기획안',body:'학생증 제시 시 10% 할인 이벤트를 기획하고 싶습니다.',category:'마케팅',status:'검토중',date:'2026-05-19',attachments:[],response:null,responseDate:null,responseAttachments:[]},
+  {id:4,userId:1,storeName:'강남점',authorName:'김철수',brandId:'starbuckskr',title:'에어컨 설비 점검 요청',body:'에어컨이 작동하지 않아 고객 불편이 발생하고 있습니다.',category:'운영',status:'기각',date:'2026-05-12',attachments:[],response:'계약서 12조에 따라 본사 지원 대상이 아닙니다.',responseDate:'2026-05-14',responseAttachments:[]},
+  {id:5,userId:2,storeName:'홍대점',authorName:'이영희',brandId:'starbuckskr',title:'SNS 콘텐츠 제작 지원 요청',body:'인스타그램 콘텐츠 제작 지원을 요청드립니다.',category:'마케팅',status:'검토중',date:'2026-05-20',attachments:[],response:null,responseDate:null,responseAttachments:[]},
+  {id:6,userId:3,storeName:'신촌점',authorName:'박민준',brandId:'starbuckskr',title:'신메뉴 직원 교육 요청',body:'신메뉴 직원 교육 일정을 잡아주시면 감사하겠습니다.',category:'기타',status:'검토중',date:'2026-05-21',attachments:[],response:null,responseDate:null,responseAttachments:[]},
+  {id:7,userId:4,storeName:'강북점',authorName:'최수진',brandId:'parisbaguette',title:'크루아상 신메뉴 레시피 교육 요청',body:'이번 달 신제품 크루아상 제조 레시피 교육을 요청드립니다. 직원들이 어려움을 겪고 있어 빠른 지원 부탁드립니다.',category:'기타',status:'검토중',date:'2026-05-20',attachments:[],response:null,responseDate:null,responseAttachments:[]},
+  {id:8,userId:5,storeName:'마포점',authorName:'정민호',brandId:'parisbaguette',title:'여름 포장재 추가 발주 요청',body:'여름 시즌 포장재 재고가 부족합니다. 추가 발주 지원을 요청드립니다.',category:'운영',status:'완료',date:'2026-05-15',attachments:[],response:'포장재 추가분 5월 25일 배송 예정입니다.',responseDate:'2026-05-16',responseAttachments:[]},
+];
+
+const INITIAL_NOTICES = [
+  {id:1,brandId:'starbuckskr',title:'6월 신메뉴 출시 안내',body:'6월 1일부터 여름 시즌 신메뉴가 출시됩니다. 메뉴판 교체 및 레시피 교육은 5월 28일까지 완료해 주세요. 세부 내용은 첨부파일을 참고하시기 바랍니다.',date:'2026-05-18',attachments:[],target:'전체'},
+  {id:2,brandId:'starbuckskr',title:'6월 위생 점검 일정 공지',body:'6월 중 전 매장 위생 점검이 진행됩니다. 점검 전 청소 체크리스트를 반드시 완료해 주시기 바랍니다.',date:'2026-05-20',attachments:[],target:'강남점'},
+  {id:3,brandId:'parisbaguette',title:'여름 시즌 신제품 출시 안내',body:'6월부터 망고 크림빵 등 여름 한정 메뉴가 출시됩니다. 재료 수급 일정은 별도 공지 예정입니다.',date:'2026-05-19',attachments:[],target:'전체'},
+];
+
+const INITIAL_EVENTS = [
+  {id:1,brandId:'starbuckskr',title:'바리스타 심화 교육',date:'2026-06-05',time:'10:00',location:'본사 교육센터 3층',type:'education',target:'전체'},
+  {id:2,brandId:'starbuckskr',title:'여름 프로모션 킥오프',date:'2026-06-10',time:'14:00',location:'코엑스 컨퍼런스룸',type:'event',target:'전체'},
+  {id:3,brandId:'starbuckskr',title:'강남점 운영 미팅',date:'2026-06-03',time:'11:00',location:'강남점 매장',type:'meeting',target:'강남점'},
+  {id:4,brandId:'starbuckskr',title:'여름 메뉴 교육',date:'2026-05-28',time:'09:00',location:'본사 교육센터',type:'education',target:'전체'},
+  {id:5,brandId:'parisbaguette',title:'제빵 기술 심화 교육',date:'2026-06-08',time:'10:00',location:'파리바게트 본사 교육실',type:'education',target:'전체'},
+  {id:6,brandId:'parisbaguette',title:'여름 신메뉴 론칭 행사',date:'2026-06-15',time:'13:00',location:'코엑스 홀',type:'event',target:'전체'},
+];
+
+const INITIAL_ORDERS = [
+  {id:1,userId:1,storeName:'강남점',authorName:'김철수',brandId:'starbuckskr',items:[{name:'에티오피아 원두',qty:'20',unit:'kg'},{name:'일회용 컵(M)',qty:'500',unit:'개'}],note:'주말 행사 관련 긴급 발주입니다.',status:'배송중',date:'2026-05-19',response:'발주 승인. 5/22 배송 예정입니다.',responseDate:'2026-05-20'},
+  {id:2,userId:2,storeName:'홍대점',authorName:'이영희',brandId:'starbuckskr',items:[{name:'바닐라 시럽',qty:'10',unit:'병'}],note:'',status:'검토중',date:'2026-05-21',response:null,responseDate:null},
+  {id:3,userId:3,storeName:'신촌점',authorName:'박민준',brandId:'starbuckskr',items:[{name:'냅킨',qty:'1000',unit:'장'},{name:'빨대',qty:'500',unit:'개'}],note:'',status:'완료',date:'2026-05-15',response:'배송 완료되었습니다.',responseDate:'2026-05-18'},
+  {id:4,userId:4,storeName:'강북점',authorName:'최수진',brandId:'parisbaguette',items:[{name:'밀가루',qty:'50',unit:'kg'},{name:'버터',qty:'20',unit:'kg'}],note:'여름 신메뉴 준비 물량입니다.',status:'검토중',date:'2026-05-22',response:null,responseDate:null},
+  {id:5,userId:5,storeName:'마포점',authorName:'정민호',brandId:'parisbaguette',items:[{name:'포장 박스(대)',qty:'300',unit:'개'}],note:'',status:'승인',date:'2026-05-20',response:'승인 완료. 5/27 배송 예정입니다.',responseDate:'2026-05-21'},
+];
+
+const INITIAL_MESSAGES = [
+  {id:1,brandId:'starbuckskr',storeUserId:1,storeName:'강남점',sender:'franchise',text:'안녕하세요. 다음 달 가격 관련하여 문의드립니다.',timestamp:'2026-05-20T14:30:00'},
+  {id:2,brandId:'starbuckskr',storeUserId:1,storeName:'강남점',sender:'hq',text:'안녕하세요! 가격 변동은 없습니다. 추가 문의 있으시면 말씀해 주세요.',timestamp:'2026-05-20T15:02:00'},
+  {id:3,brandId:'starbuckskr',storeUserId:2,storeName:'홍대점',sender:'franchise',text:'여름 프로모션 POP 자료 언제 받을 수 있을까요?',timestamp:'2026-05-21T10:15:00'},
+  {id:4,brandId:'starbuckskr',storeUserId:2,storeName:'홍대점',sender:'hq',text:'5월 28일까지 각 매장으로 발송 예정입니다!',timestamp:'2026-05-21T11:00:00'},
+  {id:5,brandId:'parisbaguette',storeUserId:4,storeName:'강북점',sender:'franchise',text:'안녕하세요. 6월 제빵 교육 신청은 어떻게 하면 될까요?',timestamp:'2026-05-21T09:30:00'},
+  {id:6,brandId:'parisbaguette',storeUserId:4,storeName:'강북점',sender:'hq',text:'6월 8일 오전 10시 본사 교육실에서 진행됩니다. 별도 신청 없이 참석하시면 됩니다!',timestamp:'2026-05-21T10:05:00'},
+  {id:7,brandId:'parisbaguette',storeUserId:5,storeName:'마포점',sender:'franchise',text:'발주한 포장 박스 배송 일정 확인 부탁드립니다.',timestamp:'2026-05-22T14:00:00'},
+  {id:8,brandId:'parisbaguette',storeUserId:5,storeName:'마포점',sender:'hq',text:'5월 27일 오전 중 배송 예정입니다. 조금만 기다려 주세요!',timestamp:'2026-05-22T14:30:00'},
+];
+
+const INITIAL_FR_MESSAGES = [
+  {id:1,brandId:'starbuckskr',fromUserId:1,fromStoreName:'강남점',toUserId:2,toStoreName:'홍대점',text:'안녕하세요! 이번 여름 프로모션 준비 어떻게 하고 계세요?',timestamp:'2026-05-21T13:00:00'},
+  {id:2,brandId:'starbuckskr',fromUserId:2,fromStoreName:'홍대점',toUserId:1,toStoreName:'강남점',text:'아직 준비 중이에요. POP 자료 받으셨나요?',timestamp:'2026-05-21T13:10:00'},
+  {id:3,brandId:'starbuckskr',fromUserId:1,fromStoreName:'강남점',toUserId:2,toStoreName:'홍대점',text:'아직요. 본사에서 28일까지 보내준다고 하더라고요!',timestamp:'2026-05-21T13:15:00'},
+  {id:4,brandId:'parisbaguette',fromUserId:4,fromStoreName:'강북점',toUserId:5,toStoreName:'마포점',text:'신메뉴 크루아상 판매량 어떻게 되세요?',timestamp:'2026-05-22T10:00:00'},
+  {id:5,brandId:'parisbaguette',fromUserId:5,fromStoreName:'마포점',toUserId:4,toStoreName:'강북점',text:'하루 50개 정도요. 생각보다 반응이 정말 좋네요!',timestamp:'2026-05-22T10:15:00'},
+];
+
+/* ══════════ UTILS ══════════ */
+const readFile = f => new Promise(res => { const r=new FileReader(); r.onload=e=>res({name:f.name,size:f.size,type:f.type,url:e.target.result}); r.readAsDataURL(f); });
+const formatSize = b => b<1024?`${b}B`:b<1048576?`${(b/1024).toFixed(1)}KB`:`${(b/1048576).toFixed(1)}MB`;
+const isImage = t => t.startsWith('image/');
+const fmtTS = ts => { const d=new Date(ts); return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+const today = () => new Date().toISOString().split('T')[0];
+
+/* ══════════ FILE COMPONENTS ══════════ */
+function FileAttacher({files,onChange,accentColor=FR_COLOR}) {
+  const ref = useRef();
+  const handle = async e => { const added=await Promise.all(Array.from(e.target.files).map(readFile)); onChange([...files,...added]); e.target.value=''; };
+  const drop = async e => { e.preventDefault(); const added=await Promise.all(Array.from(e.dataTransfer.files).map(readFile)); onChange([...files,...added]); };
+  return (
+    <div>
+      <div className="border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-colors"
+           style={{borderColor:'#d1d5db'}}
+           onDragOver={e=>{e.preventDefault();e.currentTarget.style.borderColor=accentColor;}}
+           onDragLeave={e=>{e.currentTarget.style.borderColor='#d1d5db';}}
+           onDrop={async e=>{e.currentTarget.style.borderColor='#d1d5db';await drop(e);}}
+           onClick={()=>ref.current.click()}>
+        <input ref={ref} type="file" multiple hidden onChange={handle}/>
+        <div className="text-xl mb-1">📎</div>
+        <p className="text-sm text-gray-500">클릭하거나 드래그하여 첨부</p>
+        <p className="text-xs text-gray-400 mt-0.5">이미지, PDF, 문서 등 모든 형식</p>
+      </div>
+      {files.length>0 && <div className="mt-2 space-y-1.5">
+        {files.map((f,i)=>(
+          <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm" style={{backgroundColor:'#f8fafc',border:'1px solid #e2e8f0'}}>
+            <span>{isImage(f.type)?'🖼️':'📄'}</span>
+            <span className="flex-1 truncate text-xs text-gray-700">{f.name}</span>
+            <span className="text-xs text-gray-400">{formatSize(f.size)}</span>
+            <button className="text-gray-400 hover:text-red-500" onClick={e=>{e.stopPropagation();onChange(files.filter((_,j)=>j!==i));}}>✕</button>
+          </div>
+        ))}
+      </div>}
+    </div>
+  );
+}
+
+function FileDisplay({files}) {
+  const [preview,setPreview]=useState(null);
+  if(!files||files.length===0) return null;
+  return (
+    <div className="mt-3">
+      <p className="text-xs font-medium text-gray-500 mb-1.5">첨부 파일 ({files.length})</p>
+      <div className="flex flex-wrap gap-2">
+        {files.map((f,i)=> isImage(f.type)?(
+          <div key={i} className="relative group cursor-pointer" onClick={()=>setPreview(preview===i?null:i)}>
+            <img src={f.url} alt={f.name} className="h-14 w-14 object-cover rounded-lg border border-gray-200"/>
+          </div>
+        ):(
+          <a key={i} href={f.url} download={f.name} onClick={e=>e.stopPropagation()}
+             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border border-gray-200 hover:bg-gray-50 text-gray-600">
+            📄 <span className="max-w-24 truncate">{f.name}</span> <span className="text-gray-400">{formatSize(f.size)}</span>
+          </a>
+        ))}
+      </div>
+      {preview!==null && isImage(files[preview]?.type) && (
+        <div className="mt-2">
+          <img src={files[preview].url} alt={files[preview].name} className="w-full max-h-56 object-contain rounded-xl border border-gray-200"/>
+          <div className="flex justify-between mt-1">
+            <span className="text-xs text-gray-400">{files[preview].name}</span>
+            <a href={files[preview].url} download={files[preview].name} className="text-xs text-blue-500 hover:underline" onClick={e=>e.stopPropagation()}>다운로드</a>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════ BADGES ══════════ */
+function Badge({label,color,bg}){return <span style={{backgroundColor:bg,color}} className="text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap">{label}</span>;}
+function StatusBadge({status}){
+  if(status==='완료') return <Badge label="완료" color="#166534" bg="#dcfce7"/>;
+  if(status==='기각') return <Badge label="기각" color="#991b1b" bg="#fee2e2"/>;
+  return <Badge label="검토중" color="#92400e" bg="#fef3c7"/>;
+}
+function OrderStatusBadge({status}){const s=ORDER_STATUS_STYLE[status]||{color:'#374151',bg:'#f3f4f6'};return <Badge label={status} color={s.color} bg={s.bg}/>;}
+function CatBadge({cat}){return <Badge label={cat} color="#374151" bg="#f3f4f6"/>;}
+
+/* ══════════ MODALS ══════════ */
+function ActionModal({modal,onClose,onConfirm}){
+  const [msg,setMsg]=useState('');
+  const [files,setFiles]=useState([]);
+  const ok=modal.type==='complete';
+  const accent=ok?HQ_COLOR:'#b91c1c';
+  return (
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{backgroundColor:'rgba(0,0,0,0.5)'}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-y-auto max-h-screen">
+        <div className="px-6 py-4 flex items-center justify-between sticky top-0" style={{backgroundColor:accent}}>
+          <div><div className="text-white font-bold">{ok?'✅ 완료 처리':'❌ 기각 처리'}</div><div className="text-white opacity-70 text-xs truncate max-w-xs">{modal.post.title}</div></div>
+          <button className="text-white opacity-60 hover:opacity-100 text-xl" onClick={onClose}>✕</button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="rounded-xl p-3.5 text-sm text-gray-500" style={{backgroundColor:'#f8fafc',border:'1px solid #e2e8f0'}}>
+            <div className="flex items-center gap-2 mb-1"><span className="font-medium text-gray-700">{modal.post.storeName}</span><CatBadge cat={modal.post.category}/></div>
+            <p className="line-clamp-2">{modal.post.body}</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">{ok?'처리 내용 메시지':'기각 사유'}<span className="text-red-400 ml-1">*</span></label>
+            <textarea className="w-full border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm resize-none focus:outline-none h-24"
+              placeholder={ok?'처리 내용을 입력하세요.':'기각 사유를 입력하세요.'} value={msg} onChange={e=>setMsg(e.target.value)} autoFocus/>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">파일 첨부 <span className="text-gray-400 font-normal">(선택)</span></label>
+            <FileAttacher files={files} onChange={setFiles} accentColor={accent}/>
+          </div>
+        </div>
+        <div className="px-6 pb-6 flex gap-2 justify-end">
+          <button className="px-5 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-500 hover:bg-gray-50" onClick={onClose}>취소</button>
+          <button className="px-5 py-2 rounded-xl text-sm font-medium text-white disabled:opacity-40" style={{backgroundColor:accent}} disabled={!msg.trim()} onClick={()=>{onConfirm(msg.trim(),files);setMsg('');setFiles([]);}}>
+            {ok?'완료 처리':'기각 처리'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OrderModal({modal,onClose,onConfirm}){
+  const [msg,setMsg]=useState('');
+  const ok=modal.type==='approve';
+  const accent=ok?'#15803d':'#b91c1c';
+  return (
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{backgroundColor:'rgba(0,0,0,0.5)'}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+        <div className="px-6 py-4 flex items-center justify-between" style={{backgroundColor:accent}}>
+          <div className="text-white font-bold">{ok?'✅ 발주 승인':'❌ 발주 거절'}</div>
+          <button className="text-white opacity-60 hover:opacity-100 text-xl" onClick={onClose}>✕</button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="rounded-xl p-3 text-sm" style={{backgroundColor:'#f8fafc',border:'1px solid #e2e8f0'}}>
+            <span className="font-medium text-gray-700">{modal.order.storeName}</span>
+            <ul className="mt-1 text-gray-500 space-y-0.5">
+              {modal.order.items.map((it,i)=><li key={i}>• {it.name} {it.qty}{it.unit}</li>)}
+            </ul>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">{ok?'승인 메시지':'거절 사유'}<span className="text-red-400 ml-1">*</span></label>
+            <textarea className="w-full border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm resize-none focus:outline-none h-20"
+              placeholder={ok?'배송 일정 등을 안내해 주세요.':'거절 사유를 입력해 주세요.'} value={msg} onChange={e=>setMsg(e.target.value)} autoFocus/>
+          </div>
+        </div>
+        <div className="px-6 pb-6 flex gap-2 justify-end">
+          <button className="px-5 py-2 rounded-xl text-sm border border-gray-200 text-gray-500 hover:bg-gray-50" onClick={onClose}>취소</button>
+          <button className="px-5 py-2 rounded-xl text-sm font-medium text-white disabled:opacity-40" style={{backgroundColor:accent}} disabled={!msg.trim()} onClick={()=>{onConfirm(msg.trim());setMsg('');}}>확인</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════ COMMON COMPONENTS ══════════ */
+function Section({title,children}){return <div className="p-6"><h2 className="text-xl font-bold text-gray-800 mb-5">{title}</h2>{children}</div>;}
+function Field({label,children}){return <div><label className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>{children}</div>;}
+function ErrMsg({msg}){return <p className="text-red-500 text-sm">⚠️ {msg}</p>;}
+function Empty({msg,icon='📭'}){return <div className="bg-white rounded-2xl shadow-sm p-12 text-center text-gray-400"><div className="text-4xl mb-3">{icon}</div><p className="text-sm">{msg}</p></div>;}
+function StatCard({label,value,color}){return <div className="bg-white rounded-2xl shadow-sm p-4"><div className="text-xs text-gray-500 mb-1">{label}</div><div className="text-2xl font-bold" style={{color}}>{value}</div></div>;}
+function SectionLabel({label,count,color,bg}){return <div className="flex items-center gap-2 mb-3"><span className="text-sm font-semibold text-gray-600">{label}</span><span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{color,backgroundColor:bg}}>{count}건</span></div>;}
+
+function FilterBar({filters,setFilters,storeNames,count}){
+  return (
+    <div className="bg-white rounded-2xl shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-end">
+      <FS label="카테고리" value={filters.category} options={['전체',...CATEGORIES]} onChange={v=>setFilters(f=>({...f,category:v}))}/>
+      <FS label="매장" value={filters.storeName} options={storeNames} onChange={v=>setFilters(f=>({...f,storeName:v}))}/>
+      <FS label="정렬" value={filters.sort} options={[['newest','최신순'],['oldest','오래된순'],['store','매장명순']]} onChange={v=>setFilters(f=>({...f,sort:v}))}/>
+      <div className="ml-auto text-sm text-gray-400 self-center">총 <strong className="text-gray-600">{count}</strong>건</div>
+    </div>
+  );
+}
+function FS({label,value,options,onChange}){
+  return <div><label className="block text-xs text-gray-500 mb-1">{label}</label>
+    <select className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none" value={value} onChange={e=>onChange(e.target.value)}>
+      {options.map(o=>Array.isArray(o)?<option key={o[0]} value={o[0]}>{o[1]}</option>:<option key={o} value={o}>{o}</option>)}
+    </select></div>;
+}
+
+function ResponseBlock({post}){
+  if(!post.response) return null;
+  const ok=post.status==='완료';
+  return (
+    <div className="mx-5 mb-5 rounded-xl p-4" style={{backgroundColor:ok?'#f0fdf4':'#fff1f2',borderLeft:`3px solid ${ok?'#16a34a':'#dc2626'}`}}>
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="text-xs font-bold" style={{color:ok?'#15803d':'#b91c1c'}}>{ok?'✅ 본사 처리 내용':'❌ 기각 사유'}</span>
+        {post.responseDate&&<span className="text-xs text-gray-400 ml-auto">{post.responseDate}</span>}
+      </div>
+      <p className="text-sm leading-relaxed" style={{color:ok?'#166534':'#991b1b'}}>{post.response}</p>
+      {post.responseAttachments?.length>0&&<FileDisplay files={post.responseAttachments}/>}
+    </div>
+  );
+}
+
+/* ══════════ POST CARDS ══════════ */
+function FranchisePostCard({post,expanded,onToggle}){
+  return (
+    <div className="bg-white rounded-2xl shadow-sm overflow-hidden cursor-pointer hover:shadow-md transition-shadow" onClick={onToggle}>
+      <div className="p-5">
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="flex items-center gap-1.5 flex-wrap"><CatBadge cat={post.category}/><StatusBadge status={post.status}/></div>
+          <span className="text-xs text-gray-400 flex-shrink-0">{post.date}</span>
+        </div>
+        <h3 className="font-semibold text-gray-800">{post.title}</h3>
+        <p className={`text-sm text-gray-500 mt-1 ${expanded?'':'line-clamp-2'}`}>{post.body}</p>
+        {post.attachments?.length>0&&<FileDisplay files={post.attachments}/>}
+      </div>
+      {post.status!=='검토중'&&<ResponseBlock post={post}/>}
+    </div>
+  );
+}
+
+function HQPostCard({post,expanded,onToggle,onAction}){
+  return (
+    <div className="bg-white rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+      <div className="p-5 cursor-pointer" onClick={onToggle}>
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <CatBadge cat={post.category}/>
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{backgroundColor:'#eff6ff',color:'#1d4ed8'}}>{post.storeName}</span>
+            <StatusBadge status={post.status}/>
+          </div>
+          <span className="text-xs text-gray-400 flex-shrink-0">{post.date}</span>
+        </div>
+        <h3 className="font-semibold text-gray-800">{post.title}</h3>
+        <p className={`text-sm text-gray-500 mt-1 ${expanded?'':'line-clamp-2'}`}>{post.body}</p>
+        <p className="text-xs text-gray-400 mt-2">작성자: {post.authorName}</p>
+        {post.attachments?.length>0&&<FileDisplay files={post.attachments}/>}
+      </div>
+      <div className="px-5 pb-4 flex gap-2 justify-end" onClick={e=>e.stopPropagation()}>
+        <button className="text-sm px-4 py-1.5 rounded-lg font-medium border hover:bg-red-50" style={{borderColor:'#dc2626',color:'#dc2626'}} onClick={()=>onAction('reject')}>기각</button>
+        <button className="text-sm px-4 py-1.5 rounded-lg text-white font-medium hover:opacity-80" style={{backgroundColor:HQ_COLOR}} onClick={()=>onAction('complete')}>완료 처리</button>
+      </div>
+    </div>
+  );
+}
+
+function HQResolvedCard({post,expanded,onToggle,onDelete}){
+  return (
+    <div className="bg-white rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={onToggle}>
+      <div className="p-5">
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <CatBadge cat={post.category}/>
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{backgroundColor:'#eff6ff',color:'#1d4ed8'}}>{post.storeName}</span>
+            <StatusBadge status={post.status}/>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="text-xs text-gray-400">{post.date}</span>
+            <button className="text-xs px-2.5 py-1 rounded-lg border text-red-400 border-red-200 hover:bg-red-50"
+              onClick={e=>{e.stopPropagation();if(window.confirm('삭제하시겠습니까?'))onDelete(post.id);}}>삭제</button>
+          </div>
+        </div>
+        <h3 className="font-semibold text-gray-800">{post.title}</h3>
+        <p className={`text-sm text-gray-500 mt-1 ${expanded?'':'line-clamp-2'}`}>{post.body}</p>
+        <p className="text-xs text-gray-400 mt-2">작성자: {post.authorName}</p>
+        {post.attachments?.length>0&&<FileDisplay files={post.attachments}/>}
+      </div>
+      <ResponseBlock post={post}/>
+    </div>
+  );
+}
+
+/* ══════════ NOTICE COMPONENTS ══════════ */
+function NoticeCard({notice,expanded,onToggle,onDelete}){
+  return (
+    <div className="bg-white rounded-2xl shadow-sm overflow-hidden cursor-pointer hover:shadow-md transition-shadow" onClick={onToggle}>
+      <div className="p-5">
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{backgroundColor:'#fef3c7',color:'#92400e'}}>📢 공지</span>
+            {notice.target&&notice.target!=='전체'
+              ?<span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{backgroundColor:'#eff6ff',color:'#1d4ed8'}}>{notice.target}</span>
+              :<span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{backgroundColor:'#f3f4f6',color:'#6b7280'}}>전체 매장</span>}
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="text-xs text-gray-400">{notice.date}</span>
+            {onDelete&&<button className="text-xs px-2.5 py-1 rounded-lg border text-red-400 border-red-200 hover:bg-red-50"
+              onClick={e=>{e.stopPropagation();if(window.confirm('공지를 삭제하시겠습니까?'))onDelete(notice.id);}}>삭제</button>}
+          </div>
+        </div>
+        <h3 className="font-semibold text-gray-800">{notice.title}</h3>
+        <p className={`text-sm text-gray-500 mt-1 ${expanded?'leading-relaxed':'line-clamp-2'}`}>{notice.body}</p>
+        {notice.attachments?.length>0&&<FileDisplay files={notice.attachments}/>}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════ CALENDAR & EVENTS ══════════ */
+function EventCard({event,onDelete}){
+  const t=EVENT_TYPES[event.type]||{};
+  return (
+    <div className="flex items-start gap-3 p-3 rounded-xl" style={{backgroundColor:t.bg||'#f3f4f6'}}>
+      <span className="text-xl flex-shrink-0">{t.icon||'📅'}</span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <p className="font-semibold text-sm text-gray-800">{event.title}</p>
+            <p className="text-xs mt-0.5" style={{color:t.color||'#374151'}}>
+              {event.date}{event.time&&` · ${event.time}`}{event.location&&` · ${event.location}`}
+            </p>
+            {event.target!=='전체'&&<p className="text-xs text-gray-500 mt-0.5">대상: {event.target}</p>}
+          </div>
+          {onDelete&&<button className="text-gray-300 hover:text-red-400 flex-shrink-0" onClick={()=>onDelete(event.id)}>✕</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CalendarView({events,currentUser,onDeleteEvent}){
+  const [year,setYear]=useState(2026);
+  const [month,setMonth]=useState(5);
+  const [selDay,setSelDay]=useState(null);
+  const prevMonth=()=>{if(month===1){setMonth(12);setYear(y=>y-1);}else setMonth(m=>m-1);setSelDay(null);};
+  const nextMonth=()=>{if(month===12){setMonth(1);setYear(y=>y+1);}else setMonth(m=>m+1);setSelDay(null);};
+  const firstDay=new Date(year,month-1,1).getDay();
+  const daysInMonth=new Date(year,month,0).getDate();
+  const pad=(firstDay+6)%7;
+  const cells=[...Array(pad).fill(null),...Array.from({length:daysInMonth},(_,i)=>i+1)];
+  while(cells.length%7!==0)cells.push(null);
+  const filtered=events.filter(e=>{
+    if(currentUser?.role==='franchise') return e.target==='전체'||e.target===currentUser.storeName;
+    return true;
+  });
+  const monthEvs=filtered.filter(e=>{const d=new Date(e.date);return d.getFullYear()===year&&d.getMonth()+1===month;});
+  const getDayEvs=d=>monthEvs.filter(e=>new Date(e.date).getDate()===d);
+  const upcoming=filtered.filter(e=>e.date>='2026-05-23').sort((a,b)=>a.date.localeCompare(b.date)).slice(0,8);
+  const selEvs=selDay?getDayEvs(selDay):null;
+  return (
+    <div className="space-y-4 max-w-2xl">
+      <div className="bg-white rounded-2xl shadow-sm p-5">
+        <div className="flex items-center justify-between mb-4">
+          <button className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-600 text-lg" onClick={prevMonth}>‹</button>
+          <span className="font-bold text-gray-800">{year}년 {month}월</span>
+          <button className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-600 text-lg" onClick={nextMonth}>›</button>
+        </div>
+        <div className="grid grid-cols-7 mb-2">
+          {['월','화','수','목','금','토','일'].map((d,i)=>(
+            <div key={d} className="text-center text-xs font-medium py-1" style={{color:i>=5?'#ef4444':'#9ca3af'}}>{d}</div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {cells.map((day,i)=>{
+            const evs=day?getDayEvs(day):[];
+            const isSel=day===selDay;
+            const isToday=day&&year===2026&&month===5&&day===23;
+            const dow=i%7;
+            return (
+              <div key={i} className={`min-h-14 p-1 rounded-lg transition-colors ${day?'cursor-pointer hover:bg-gray-50':''} ${isSel?'bg-blue-50':''}`}
+                   onClick={()=>day&&setSelDay(isSel?null:day)}>
+                {day&&<>
+                  <div className="flex justify-center mb-0.5">
+                    <span className="w-6 h-6 flex items-center justify-center text-xs font-medium rounded-full"
+                          style={{backgroundColor:isToday?HQ_COLOR:'transparent',color:isToday?'white':dow===5?'#3b82f6':dow===6?'#ef4444':'#374151'}}>
+                      {day}
+                    </span>
+                  </div>
+                  {evs.slice(0,2).map(e=>(
+                    <div key={e.id} className="text-xs px-1 py-0.5 rounded truncate mb-0.5"
+                         style={{backgroundColor:(EVENT_TYPES[e.type]?.bg||'#f3f4f6'),color:EVENT_TYPES[e.type]?.color||'#374151'}}>
+                      {e.title}
+                    </div>
+                  ))}
+                  {evs.length>2&&<div className="text-xs text-gray-400 text-center">+{evs.length-2}</div>}
+                </>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <div className="bg-white rounded-2xl shadow-sm p-5">
+        <h3 className="font-semibold text-gray-700 mb-3">
+          {selDay?`${month}월 ${selDay}일 일정`:'다가오는 일정'}
+        </h3>
+        {(selEvs||upcoming).length===0?<p className="text-sm text-gray-400 text-center py-4">일정이 없습니다.</p>:(
+          <div className="space-y-2">
+            {(selEvs||upcoming).map(e=><EventCard key={e.id} event={e} onDelete={onDeleteEvent}/>)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════ ORDER COMPONENTS ══════════ */
+function OrderCard({order,expanded,onToggle,isHQ,onAction}){
+  const hasActions=isHQ&&order.status!=='완료'&&order.status!=='거절';
+  return (
+    <div className="bg-white rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+      <div className="p-5 cursor-pointer" onClick={onToggle}>
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {isHQ&&<span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{backgroundColor:'#eff6ff',color:'#1d4ed8'}}>{order.storeName}</span>}
+            <OrderStatusBadge status={order.status}/>
+          </div>
+          <span className="text-xs text-gray-400 flex-shrink-0">{order.date}</span>
+        </div>
+        <div className="space-y-0.5 mb-2">
+          {order.items.map((it,i)=><p key={i} className="text-sm text-gray-700">• {it.name} <span className="font-semibold">{it.qty}{it.unit}</span></p>)}
+        </div>
+        {order.note&&<p className="text-xs text-gray-500 mt-2 bg-gray-50 rounded-lg px-3 py-2">{order.note}</p>}
+        {isHQ&&<p className="text-xs text-gray-400 mt-2">작성자: {order.authorName}</p>}
+      </div>
+      {order.response&&(
+        <div className="mx-5 mb-5 rounded-xl p-4" style={{backgroundColor:order.status==='거절'?'#fff1f2':'#f0fdf4',borderLeft:`3px solid ${order.status==='거절'?'#dc2626':'#16a34a'}`}}>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-bold" style={{color:order.status==='거절'?'#b91c1c':'#15803d'}}>{order.status==='거절'?'❌ 거절 사유':'✅ 본사 메시지'}</span>
+            <span className="text-xs text-gray-400">{order.responseDate}</span>
+          </div>
+          <p className="text-sm" style={{color:order.status==='거절'?'#991b1b':'#166534'}}>{order.response}</p>
+        </div>
+      )}
+      {hasActions&&(
+        <div className="px-5 pb-4 flex gap-2 flex-wrap" onClick={e=>e.stopPropagation()}>
+          {order.status==='검토중'&&<>
+            <button className="text-sm px-3 py-1.5 rounded-lg border text-red-500 border-red-200 hover:bg-red-50" onClick={()=>onAction('reject',order)}>거절</button>
+            <button className="text-sm px-3 py-1.5 rounded-lg text-white font-medium" style={{backgroundColor:'#15803d'}} onClick={()=>onAction('approve',order)}>승인</button>
+          </>}
+          {order.status==='승인'&&<button className="text-sm px-3 py-1.5 rounded-lg text-white font-medium" style={{backgroundColor:'#7c3aed'}} onClick={()=>onAction('ship',order)}>배송중으로 변경</button>}
+          {order.status==='배송중'&&<button className="text-sm px-3 py-1.5 rounded-lg text-white font-medium" style={{backgroundColor:'#16a34a'}} onClick={()=>onAction('done',order)}>배송 완료</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════ CHAT COMPONENTS ══════════ */
+function ChatBubble({msg,isMine}){
+  return (
+    <div className={`flex ${isMine?'justify-end':'justify-start'} mb-2`}>
+      <div className={`max-w-xs lg:max-w-sm px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${isMine?'rounded-br-md':'rounded-bl-md'}`}
+           style={isMine?{backgroundColor:HQ_COLOR,color:'white'}:{backgroundColor:'#f3f4f6',color:'#374151'}}>
+        {msg.text}
+        <div className={`text-xs mt-1 ${isMine?'text-white opacity-60':'text-gray-400'}`}>{fmtTS(msg.timestamp)}</div>
+      </div>
+    </div>
+  );
+}
+
+function ChatWindow({messages,storeUserId,senderRole,onSend,title}){
+  const [input,setInput]=useState('');
+  const endRef=useRef(null);
+  const filtered=messages.filter(m=>m.storeUserId===storeUserId);
+  useEffect(()=>{endRef.current?.scrollIntoView({behavior:'smooth'});},[messages,storeUserId]);
+  const send=()=>{if(!input.trim())return;onSend(input.trim());setInput('');};
+  return (
+    <div className="flex flex-col h-full">
+      <div className="px-5 py-3 border-b border-gray-100 font-semibold text-gray-800 flex-shrink-0">{title}</div>
+      <div className="flex-1 overflow-y-auto p-5 min-h-0" style={{maxHeight:'400px'}}>
+        {filtered.length===0&&<p className="text-sm text-gray-400 text-center mt-8">아직 대화 내용이 없습니다.</p>}
+        {filtered.map(m=><ChatBubble key={m._docId||m.id} msg={m} isMine={m.sender===senderRole}/>)}
+        <div ref={endRef}/>
+      </div>
+      <div className="p-4 border-t border-gray-100 flex gap-2 flex-shrink-0">
+        <textarea className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none focus:outline-none" rows={2}
+          placeholder="메시지를 입력하세요... (Enter: 전송, Shift+Enter: 줄바꿈)"
+          value={input} onChange={e=>setInput(e.target.value)}
+          onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}}/>
+        <button className="px-4 py-2 rounded-xl text-white text-sm font-medium self-end disabled:opacity-40"
+          style={{backgroundColor:HQ_COLOR}} disabled={!input.trim()} onClick={send}>전송</button>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════ FR CHAT WINDOW ══════════ */
+function FrChatWindow({messages,currentUserId,toStore,onSend}){
+  const [input,setInput]=useState('');
+  const endRef=useRef(null);
+  useEffect(()=>{endRef.current?.scrollIntoView({behavior:'smooth'});},[messages,toStore]);
+  const send=()=>{if(!input.trim())return;onSend(input.trim());setInput('');};
+  return (
+    <div className="flex flex-col h-full">
+      <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2 flex-shrink-0">
+        <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold" style={{backgroundColor:FR_COLOR+'20',color:FR_COLOR}}>{toStore.storeName[0]}</div>
+        <span className="font-semibold text-gray-800">{toStore.storeName}</span>
+      </div>
+      <div className="flex-1 overflow-y-auto p-5 min-h-0" style={{maxHeight:'400px'}}>
+        {messages.length===0&&<p className="text-sm text-gray-400 text-center mt-8">아직 대화 내용이 없습니다.</p>}
+        {messages.map(m=><ChatBubble key={m._docId||m.id} msg={{...m,sender:m.fromUserId===currentUserId?'me':'other'}} isMine={m.fromUserId===currentUserId}/>)}
+        <div ref={endRef}/>
+      </div>
+      <div className="p-4 border-t border-gray-100 flex gap-2 flex-shrink-0">
+        <textarea className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none focus:outline-none" rows={2}
+          placeholder="메시지를 입력하세요... (Enter: 전송, Shift+Enter: 줄바꿈)"
+          value={input} onChange={e=>setInput(e.target.value)}
+          onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}}/>
+        <button className="px-4 py-2 rounded-xl text-white text-sm font-medium self-end disabled:opacity-40"
+          style={{backgroundColor:FR_COLOR}} disabled={!input.trim()} onClick={send}>전송</button>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════ APP ══════════ */
+function App(){
+  const [loading, setLoading] = useState(true);
+  const [brands, setBrands] = useState([]);
+  const [users,  setUsers]  = useState([]);
+  const [posts,  setPosts]  = useState([]);
+  const [notices,setNotices]= useState([]);
+  const [events, setEvents] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [messages,setMessages]=useState([]);
+  const [currentUser,setCurrentUser]=useState(null);
+  const [dbError,setDbError]=useState('');
+
+  /* auth */
+  const [screen,setScreen]=useState('login');
+  const [loginTab,setLoginTab]=useState('franchise');
+  const [signupStep,setSignupStep]=useState(1);
+  const [verifiedBrand,setVerifiedBrand]=useState(null);
+  const [hqForm,setHqForm]=useState({brandId:'',password:''});
+  const [frForm,setFrForm]=useState({email:'',password:''});
+  const [brandForm,setBrandForm]=useState({id:'',password:''});
+  const [signupForm,setSignupForm]=useState({name:'',storeName:'',email:'',password:''});
+  const [authError,setAuthError]=useState('');
+
+  /* nav */
+  const [activeNav,setActiveNav]=useState('posts');
+  const [navGroupOpen,setNavGroupOpen]=useState(false);
+
+  /* post form */
+  const [newPost,setNewPost]=useState({title:'',body:'',category:'운영',attachments:[]});
+  const [postOk,setPostOk]=useState(false);
+  const [filters,setFilters]=useState({category:'전체',storeName:'전체',sort:'newest'});
+  const [expandedId,setExpandedId]=useState(null);
+  const [actionModal,setActionModal]=useState(null);
+
+  /* notice form */
+  const [newNotice,setNewNotice]=useState({title:'',body:'',attachments:[],target:'전체'});
+  const [noticeOk,setNoticeOk]=useState(false);
+  const [noticeExpId,setNoticeExpId]=useState(null);
+
+  /* event form */
+  const [newEvent,setNewEvent]=useState({title:'',date:'',time:'',location:'',type:'education',target:'전체'});
+  const [eventOk,setEventOk]=useState(false);
+  const [showEventForm,setShowEventForm]=useState(false);
+
+  /* order */
+  const [orderForm,setOrderForm]=useState({items:[{name:'',qty:'',unit:''}],note:''});
+  const [orderOk,setOrderOk]=useState(false);
+  const [orderModal,setOrderModal]=useState(null);
+  const [orderExpId,setOrderExpId]=useState(null);
+  const [orderFilter,setOrderFilter]=useState('전체');
+
+  /* chat */
+  const [activeChatStore,setActiveChatStore]=useState(null);
+  const [adminActiveChat,setAdminActiveChat]=useState(null);
+  const [adminChatTab,setAdminChatTab]=useState('hq');
+  const [adminActiveFrChat,setAdminActiveFrChat]=useState(null);
+  const [frMessages,setFrMessages]=useState([]);
+  const [activeFrStore,setActiveFrStore]=useState(null);
+
+  const resetAuth=()=>{setAuthError('');setSignupStep(1);setVerifiedBrand(null);setBrandForm({id:'',password:''});setSignupForm({name:'',storeName:'',email:'',password:''});setHqForm({brandId:'',password:''});setFrForm({email:'',password:''});};
+
+  /* ── Firebase: 브랜드/유저 로드 ── */
+  useEffect(()=>{
+    seedIfEmpty();
+    const timer=setTimeout(()=>setLoading(false),8000); // 8초 후 강제 로드
+    const unsubs=[];
+    unsubs.push(db.collection('brands').onSnapshot(snap=>setBrands(snap.docs.map(d=>({...d.data(),_docId:d.id}))),e=>{console.error('brands:',e);setLoading(false);}));
+    unsubs.push(db.collection('users').onSnapshot(snap=>{setUsers(snap.docs.map(d=>({...d.data(),_docId:d.id})));clearTimeout(timer);setLoading(false);},e=>{console.error('users:',e);setLoading(false);}));
+    return ()=>{unsubs.forEach(u=>u());clearTimeout(timer);};
+  },[]);
+
+  /* ── Firebase: 로그인 후 데이터 ── */
+  useEffect(()=>{
+    if(!currentUser){setPosts([]);setNotices([]);setEvents([]);setOrders([]);setMessages([]);setFrMessages([]);return;}
+    const unsubs=[];
+    // 모든 컬렉션을 필터 없이 불러오고 클라이언트에서 brandId로 분류 (쿼리 인덱스 오류 방지)
+    const onErr=e=>{console.error('Firestore 오류:',e);setDbError('❌ Firestore 연결 오류: '+e.message+' — Firebase 콘솔에서 보안 규칙을 확인하세요.');};
+    unsubs.push(db.collection('posts').onSnapshot(snap=>{setPosts(snap.docs.map(d=>({...d.data(),_docId:d.id})));setDbError('');},onErr));
+    unsubs.push(db.collection('notices').onSnapshot(snap=>setNotices(snap.docs.map(d=>({...d.data(),_docId:d.id}))),onErr));
+    unsubs.push(db.collection('events').onSnapshot(snap=>setEvents(snap.docs.map(d=>({...d.data(),_docId:d.id}))),onErr));
+    unsubs.push(db.collection('orders').onSnapshot(snap=>setOrders(snap.docs.map(d=>({...d.data(),_docId:d.id}))),onErr));
+    unsubs.push(db.collection('messages').onSnapshot(snap=>setMessages(snap.docs.map(d=>({...d.data(),_docId:d.id}))),onErr));
+    unsubs.push(db.collection('frMessages').onSnapshot(snap=>setFrMessages(snap.docs.map(d=>({...d.data(),_docId:d.id}))),onErr));
+    return ()=>unsubs.forEach(u=>u());
+  },[currentUser?.brandId,currentUser?.role]);
+
+  /* ── auth handlers ── */
+  const handleHQLogin=()=>{
+    if(hqForm.brandId===ADMIN_CRED.id&&hqForm.password===ADMIN_CRED.password){
+      setCurrentUser({role:'admin',name:'시스템 관리자',brandId:'_admin'});
+      setAuthError('');setActiveNav('accounts');return;
+    }
+    const b=brands.find(b=>b.hqId===hqForm.brandId&&b.hqPassword===hqForm.password);
+    if(!b){setAuthError('기업 아이디 또는 비밀번호가 올바르지 않습니다.');return;}
+    setCurrentUser({role:'hq',brandId:b.id,brandName:b.name,brandIcon:b.icon,name:`${b.name} 본사 관리자`});
+    setAuthError('');setActiveNav('posts');
+  };
+  const handleFrLogin=()=>{
+    const u=users.find(u=>u.email===frForm.email&&u.password===frForm.password);
+    if(!u){setAuthError('이메일 또는 비밀번호가 올바르지 않습니다.');return;}
+    const b=brands.find(b=>b.id===u.brandId);
+    setCurrentUser({...u,brandName:b?.name||'',brandIcon:b?.icon||''});
+    setAuthError('');setActiveNav('posts');
+  };
+  const handleBrandVerify=()=>{
+    const b=brands.find(b=>b.id===brandForm.id&&b.password===brandForm.password);
+    if(!b){setAuthError('등록되지 않은 기업 코드입니다.');return;}
+    setVerifiedBrand({id:b.id,name:b.name,icon:b.icon});setSignupStep(2);setAuthError('');
+  };
+  const handleSignup=async()=>{
+    if(!signupForm.name||!signupForm.storeName||!signupForm.email||!signupForm.password){setAuthError('모든 필드를 입력해주세요.');return;}
+    if(users.find(u=>u.email===signupForm.email)){setAuthError('이미 사용 중인 이메일입니다.');return;}
+    const newId=Date.now();
+    const u={id:newId,role:'franchise',brandId:verifiedBrand.id,...signupForm};
+    await db.collection('users').doc(String(newId)).set(u);
+    setCurrentUser({...u,brandName:verifiedBrand.name,brandIcon:verifiedBrand.icon});
+    resetAuth();setActiveNav('posts');
+  };
+  const handleLogout=()=>{setCurrentUser(null);resetAuth();setScreen('login');setLoginTab('franchise');};
+
+  /* ── post handlers ── */
+  const handleSubmitPost=async()=>{
+    if(!newPost.title||!newPost.body)return;
+    const ref=db.collection('posts').doc();
+    await ref.set({id:ref.id,userId:currentUser.id,storeName:currentUser.storeName,authorName:currentUser.name,brandId:currentUser.brandId,...newPost,status:'검토중',date:today(),response:null,responseDate:null,responseAttachments:[]});
+    setNewPost({title:'',body:'',category:'운영',attachments:[]});
+    setPostOk(true);setTimeout(()=>setPostOk(false),3500);setActiveNav('posts');
+  };
+  const handlePostAction=async(message,files)=>{
+    const{type,post}=actionModal;
+    await db.collection('posts').doc(post._docId).update({status:type==='complete'?'완료':'기각',response:message,responseDate:today(),responseAttachments:files});
+    setActionModal(null);
+  };
+  const handleDeletePost=id=>{const p=posts.find(x=>String(x.id)===String(id));if(p?._docId)db.collection('posts').doc(p._docId).delete();};
+
+  /* ── admin handlers ── */
+  const handleDeleteUser=id=>{if(!window.confirm('해당 계정을 삭제하시겠습니까?'))return;const u=users.find(x=>String(x.id)===String(id));if(u?._docId)db.collection('users').doc(u._docId).delete();};
+  const handleDeleteBrand=async id=>{if(!window.confirm('브랜드와 소속 가맹점 계정을 모두 삭제하시겠습니까?'))return;await db.collection('brands').doc(id).delete();const snap=await db.collection('users').where('brandId','==',id).get();const batch=db.batch();snap.docs.forEach(d=>batch.delete(d.ref));await batch.commit();};
+
+  /* ── notice handlers ── */
+  const handleSubmitNotice=async()=>{
+    if(!newNotice.title||!newNotice.body)return;
+    const ref=db.collection('notices').doc();
+    await ref.set({id:ref.id,brandId:currentUser.brandId,...newNotice,date:today()});
+    setNewNotice({title:'',body:'',attachments:[],target:'전체'});
+    setNoticeOk(true);setTimeout(()=>setNoticeOk(false),3500);
+  };
+  const handleDeleteNotice=id=>{const n=notices.find(x=>String(x.id)===String(id));if(n?._docId)db.collection('notices').doc(n._docId).delete();};
+
+  /* ── event handlers ── */
+  const handleSubmitEvent=async()=>{
+    if(!newEvent.title||!newEvent.date)return;
+    const ref=db.collection('events').doc();
+    await ref.set({id:ref.id,brandId:currentUser.brandId,...newEvent});
+    setNewEvent({title:'',date:'',time:'',location:'',type:'education',target:'전체'});
+    setEventOk(true);setTimeout(()=>setEventOk(false),3000);setShowEventForm(false);
+  };
+  const handleDeleteEvent=id=>{const e=events.find(x=>String(x.id)===String(id));if(e?._docId)db.collection('events').doc(e._docId).delete();};
+
+  /* ── order handlers ── */
+  const handleSubmitOrder=async()=>{
+    const valid=orderForm.items.every(it=>it.name&&it.qty);
+    if(!valid)return;
+    const ref=db.collection('orders').doc();
+    await ref.set({id:ref.id,userId:currentUser.id,storeName:currentUser.storeName,authorName:currentUser.name,brandId:currentUser.brandId,...orderForm,status:'검토중',date:today(),response:null,responseDate:null});
+    setOrderForm({items:[{name:'',qty:'',unit:''}],note:''});
+    setOrderOk(true);setTimeout(()=>setOrderOk(false),3500);
+  };
+  const handleOrderAction=(type,order)=>{
+    if(type==='approve'||type==='reject'){setOrderModal({type,order});return;}
+    const statusMap={ship:'배송중',done:'완료'};
+    db.collection('orders').doc(order._docId).update({status:statusMap[type],responseDate:today()});
+  };
+  const handleOrderModalConfirm=(msg)=>{
+    const{type,order}=orderModal;
+    db.collection('orders').doc(order._docId).update({status:type==='approve'?'승인':'거절',response:msg,responseDate:today()});
+    setOrderModal(null);
+  };
+
+  /* ── fr chat handler ── */
+  const handleSendFrMessage=(text,toUserId,toStoreName)=>{
+    const frRef=db.collection('frMessages').doc();
+    frRef.set({id:frRef.id,brandId:currentUser.brandId,fromUserId:currentUser.id,fromStoreName:currentUser.storeName,toUserId,toStoreName,text,timestamp:new Date().toISOString()})
+      .catch(e=>setDbError('❌ 메시지 전송 실패: '+e.message+' — Firebase 보안 규칙을 allow read, write: if true; 로 설정하세요.'));
+  };
+
+  /* ── chat handler ── */
+  const handleSendMessage=(text,storeUserId,storeName)=>{
+    const msgRef=db.collection('messages').doc();
+    msgRef.set({id:msgRef.id,brandId:currentUser.brandId,storeUserId,storeName,sender:currentUser.role==='hq'?'hq':'franchise',text,timestamp:new Date().toISOString()})
+      .catch(e=>setDbError('❌ 메시지 전송 실패: '+e.message+' — Firebase 보안 규칙을 allow read, write: if true; 로 설정하세요.'));
+  };
+
+  /* ── derived ── */
+  const isHQ=currentUser?.role==='hq';
+  const isAdmin=currentUser?.role==='admin';
+  const themeColor=isAdmin?ADMIN_COLOR:isHQ?HQ_COLOR:FR_COLOR;
+  const bPosts=useMemo(()=>isHQ?posts.filter(p=>p.brandId===currentUser?.brandId):[], [posts,currentUser,isHQ]);
+  const myPosts=useMemo(()=>!isHQ&&currentUser?posts.filter(p=>p.userId===currentUser.id):[], [posts,currentUser,isHQ]);
+  const myActive=useMemo(()=>myPosts.filter(p=>p.status==='검토중'),[myPosts]);
+  const myResolved=useMemo(()=>myPosts.filter(p=>p.status!=='검토중'),[myPosts]);
+  const pendingPosts=useMemo(()=>bPosts.filter(p=>p.status==='검토중'),[bPosts]);
+  const resolvedPosts=useMemo(()=>bPosts.filter(p=>p.status!=='검토중'),[bPosts]);
+  const storeNames=useMemo(()=>['전체',...new Set(bPosts.map(p=>p.storeName))],[bPosts]);
+  const brandNotices=useMemo(()=>notices.filter(n=>n.brandId===currentUser?.brandId&&(isHQ||!n.target||n.target==='전체'||n.target===currentUser?.storeName)),[notices,currentUser,isHQ]);
+  const brandEvents=useMemo(()=>events.filter(e=>e.brandId===currentUser?.brandId),[events,currentUser]);
+  const brandOrders=useMemo(()=>isHQ?orders.filter(o=>o.brandId===currentUser?.brandId):orders.filter(o=>o.userId===currentUser?.id),[orders,currentUser,isHQ]);
+  const myMessages=useMemo(()=>messages.filter(m=>m.brandId===currentUser?.brandId),[messages,currentUser]);
+
+  const applyFilters=list=>{
+    let r=[...list];
+    if(filters.category!=='전체')r=r.filter(p=>p.category===filters.category);
+    if(filters.storeName!=='전체')r=r.filter(p=>p.storeName===filters.storeName);
+    r.sort((a,b)=>filters.sort==='newest'?new Date(b.date)-new Date(a.date):filters.sort==='oldest'?new Date(a.date)-new Date(b.date):a.storeName.localeCompare(b.storeName,'ko'));
+    return r;
+  };
+  const filteredPending=useMemo(()=>applyFilters(pendingPosts),[pendingPosts,filters]);
+  const filteredResolved=useMemo(()=>applyFilters(resolvedPosts),[resolvedPosts,filters]);
+
+  const summary=useMemo(()=>({
+    total:bPosts.length,
+    unresolved:bPosts.filter(p=>p.status==='검토중').length,
+    rejected:bPosts.filter(p=>p.status==='기각').length,
+    byCategory:CATEGORIES.reduce((acc,c)=>({...acc,[c]:bPosts.filter(p=>p.category===c).length}),{}),
+  }),[bPosts]);
+
+  // peer stores (same brand, different store) for franchise-to-franchise chat
+  const peerStores=useMemo(()=>users.filter(u=>u.brandId===currentUser?.brandId&&u.id!==currentUser?.id),[users,currentUser]);
+  const myFrMessages=useMemo(()=>frMessages.filter(m=>m.brandId===currentUser?.brandId&&(m.fromUserId===currentUser?.id||m.toUserId===currentUser?.id)),[frMessages,currentUser]);
+
+  // admin: all fr-to-fr conversations
+  const allFrConvos=useMemo(()=>{
+    if(!isAdmin) return [];
+    const map={};
+    frMessages.forEach(m=>{
+      const [u1,u2]=[Math.min(m.fromUserId,m.toUserId),Math.max(m.fromUserId,m.toUserId)];
+      const key=`${m.brandId}_${u1}_${u2}`;
+      const brand=brands.find(b=>b.id===m.brandId);
+      const s1=m.fromUserId===u1?m.fromStoreName:m.toStoreName;
+      const s2=m.fromUserId===u2?m.fromStoreName:m.toStoreName;
+      if(!map[key]) map[key]={key,brandId:m.brandId,brandName:brand?.name||'',brandIcon:brand?.icon||'',userId1:u1,userId2:u2,store1:s1,store2:s2,last:m};
+      else if(m.timestamp>map[key].last.timestamp) map[key].last=m;
+    });
+    return Object.values(map).sort((a,b)=>b.last.timestamp.localeCompare(a.last.timestamp));
+  },[frMessages,brands,isAdmin]);
+
+  // admin: all chat conversations across all brands
+  const allChatConvos=useMemo(()=>{
+    if(!isAdmin) return [];
+    const map={};
+    messages.forEach(m=>{
+      const key=`${m.brandId}_${m.storeUserId}`;
+      const brand=brands.find(b=>b.id===m.brandId);
+      if(!map[key]) map[key]={key,brandId:m.brandId,brandName:brand?.name||'',brandIcon:brand?.icon||'',storeUserId:m.storeUserId,storeName:m.storeName,last:m};
+      else if(m.timestamp>map[key].last.timestamp) map[key].last=m;
+    });
+    return Object.values(map).sort((a,b)=>b.last.timestamp.localeCompare(a.last.timestamp));
+  },[messages,brands,isAdmin]);
+
+  // chat store list for HQ
+  const chatStores=useMemo(()=>{
+    const map={};
+    myMessages.forEach(m=>{if(!map[m.storeUserId])map[m.storeUserId]={userId:m.storeUserId,storeName:m.storeName,last:m};else if(m.timestamp>map[m.storeUserId].last.timestamp)map[m.storeUserId].last=m;});
+    // also include all registered franchise users
+    users.filter(u=>u.brandId===currentUser?.brandId).forEach(u=>{if(!map[u.id])map[u.id]={userId:u.id,storeName:u.storeName,last:null};});
+    return Object.values(map).sort((a,b)=>(b.last?.timestamp||'').localeCompare(a.last?.timestamp||''));
+  },[myMessages,users,currentUser]);
+
+  /* ══════════ LOADING ══════════ */
+  if(loading) return (
+    <div className="min-h-screen flex items-center justify-center" style={{background:'linear-gradient(135deg,#e8f0fe 0%,#e8f5e9 100%)'}}>
+      <div className="text-center">
+        <div className="text-5xl mb-4 animate-spin">⚙️</div>
+        <p className="text-gray-500 font-medium">데이터 불러오는 중...</p>
+      </div>
+    </div>
+  );
+
+  /* ══════════ AUTH SCREEN ══════════ */
+  if(!currentUser){
+    const isLogin=screen==='login';
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4" style={{background:'linear-gradient(135deg,#e8f0fe 0%,#e8f5e9 100%)'}}>
+        <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+          <div className="px-8 pt-8 pb-6 text-center" style={{background:`linear-gradient(135deg,${HQ_COLOR} 0%,#2a5298 100%)`}}>
+            <div className="text-2xl font-bold text-white mb-1">가맹점 소통 플랫폼</div>
+            <p className="text-blue-200 text-sm">본사와 가맹점을 연결하는 커뮤니케이션 허브</p>
+          </div>
+          <div className="p-8">
+            <div className="flex mb-6 bg-gray-100 rounded-xl p-1 gap-1">
+              {[['login','로그인'],['signup','가맹점 회원가입']].map(([s,l])=>(
+                <button key={s} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${screen===s?'bg-white shadow-sm text-gray-800':'text-gray-400 hover:text-gray-600'}`}
+                  onClick={()=>{setScreen(s);resetAuth();}}>{l}</button>
+              ))}
+            </div>
+            {isLogin&&<div>
+              <div className="flex mb-5 gap-2">
+                {[['franchise','🏪 가맹점'],['hq','🏢 본사']].map(([tab,l])=>(
+                  <button key={tab} className="flex-1 py-2.5 rounded-xl text-sm font-semibold border-2 transition-all"
+                    style={loginTab===tab?{borderColor:tab==='hq'?HQ_COLOR:FR_COLOR,backgroundColor:(tab==='hq'?HQ_COLOR:FR_COLOR)+'12',color:tab==='hq'?HQ_COLOR:FR_COLOR}:{borderColor:'#e5e7eb',color:'#9ca3af'}}
+                    onClick={()=>{setLoginTab(tab);setAuthError('');}}>{l}</button>
+                ))}
+              </div>
+              {loginTab==='franchise'&&<div className="space-y-4">
+                <Field label="이메일"><input type="email" className="input-base" placeholder="이메일" value={frForm.email} onChange={e=>setFrForm(f=>({...f,email:e.target.value}))} onKeyDown={e=>e.key==='Enter'&&handleFrLogin()}/></Field>
+                <Field label="비밀번호"><input type="password" className="input-base" placeholder="비밀번호" value={frForm.password} onChange={e=>setFrForm(f=>({...f,password:e.target.value}))} onKeyDown={e=>e.key==='Enter'&&handleFrLogin()}/></Field>
+                {authError&&<ErrMsg msg={authError}/>}
+                <button className="btn-primary w-full" style={{backgroundColor:FR_COLOR}} onClick={handleFrLogin}>로그인</button>
+              </div>}
+              {loginTab==='hq'&&<div className="space-y-4">
+                <Field label="기업 아이디"><input type="text" className="input-base" placeholder="기업 아이디" value={hqForm.brandId} onChange={e=>setHqForm(f=>({...f,brandId:e.target.value}))} onKeyDown={e=>e.key==='Enter'&&handleHQLogin()}/></Field>
+                <Field label="비밀번호"><input type="password" className="input-base" placeholder="비밀번호" value={hqForm.password} onChange={e=>setHqForm(f=>({...f,password:e.target.value}))} onKeyDown={e=>e.key==='Enter'&&handleHQLogin()}/></Field>
+                {authError&&<ErrMsg msg={authError}/>}
+                <button className="btn-primary w-full" style={{backgroundColor:HQ_COLOR}} onClick={handleHQLogin}>본사 로그인</button>
+              </div>}
+            </div>}
+            {!isLogin&&<div>
+              <div className="flex items-center mb-6 gap-2">
+                {[1,2].map(step=>(
+                  <React.Fragment key={step}>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center" style={signupStep>=step?{backgroundColor:FR_COLOR,color:'white'}:{backgroundColor:'#e5e7eb',color:'#9ca3af'}}>{signupStep>step?'✓':step}</div>
+                      <span className="text-xs font-medium" style={{color:signupStep>=step?'#374151':'#9ca3af'}}>{step===1?'본사 인증':'매장 정보'}</span>
+                    </div>
+                    {step<2&&<div className="flex-1 h-px" style={{backgroundColor:signupStep>step?FR_COLOR:'#e5e7eb'}}/>}
+                  </React.Fragment>
+                ))}
+              </div>
+              {signupStep===1&&<div className="space-y-4">
+                <div className="rounded-xl p-4" style={{backgroundColor:'#f0fdf4',border:'1px solid #bbf7d0'}}><p className="font-medium text-green-800 text-sm mb-1">🔐 본사 인증 필요</p><p className="text-green-700 text-xs">소속 본사의 기업 코드와 비밀번호를 입력해 주세요.</p></div>
+                <Field label="기업 코드"><input type="text" className="input-base" placeholder="예: starbuckskr" value={brandForm.id} onChange={e=>setBrandForm(f=>({...f,id:e.target.value}))} onKeyDown={e=>e.key==='Enter'&&handleBrandVerify()}/></Field>
+                <Field label="인증 비밀번호"><input type="password" className="input-base" placeholder="본사로부터 받은 비밀번호" value={brandForm.password} onChange={e=>setBrandForm(f=>({...f,password:e.target.value}))} onKeyDown={e=>e.key==='Enter'&&handleBrandVerify()}/></Field>
+                {authError&&<ErrMsg msg={authError}/>}
+                <button className="btn-primary w-full" style={{backgroundColor:FR_COLOR}} onClick={handleBrandVerify}>인증하기</button>
+              </div>}
+              {signupStep===2&&<div className="space-y-4">
+                <div className="rounded-xl p-3 flex items-center gap-3" style={{backgroundColor:'#f0fdf4',border:'1px solid #bbf7d0'}}><span className="text-2xl">{verifiedBrand.icon}</span><div><p className="text-xs text-green-600 font-medium">✅ 본사 인증 완료</p><p className="text-sm font-bold text-green-800">{verifiedBrand.name}</p></div></div>
+                <Field label="담당자 이름"><input type="text" className="input-base" placeholder="이름" value={signupForm.name} onChange={e=>setSignupForm(f=>({...f,name:e.target.value}))}/></Field>
+                <Field label="매장명"><input type="text" className="input-base" placeholder="예: 강남점" value={signupForm.storeName} onChange={e=>setSignupForm(f=>({...f,storeName:e.target.value}))}/></Field>
+                <Field label="이메일"><input type="email" className="input-base" placeholder="이메일" value={signupForm.email} onChange={e=>setSignupForm(f=>({...f,email:e.target.value}))}/></Field>
+                <Field label="비밀번호"><input type="password" className="input-base" placeholder="비밀번호" value={signupForm.password} onChange={e=>setSignupForm(f=>({...f,password:e.target.value}))}/></Field>
+                {authError&&<ErrMsg msg={authError}/>}
+                <div className="flex gap-2">
+                  <button className="px-4 py-2.5 rounded-xl text-sm border border-gray-200 text-gray-500 hover:bg-gray-50" onClick={()=>{setSignupStep(1);setVerifiedBrand(null);setAuthError('');}}>이전</button>
+                  <button className="btn-primary flex-1" style={{backgroundColor:FR_COLOR}} onClick={handleSignup}>가맹점 등록</button>
+                </div>
+              </div>}
+            </div>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ══════════ MAIN LAYOUT ══════════ */
+  const navItems=isAdmin
+    ?[['accounts','👥','계정 관리'],['chatmonitor','💬','채팅 모니터링']]
+    :isHQ
+    ?[['posts','📋','전체 문의'],['notices','📢','공지사항'],['schedule','📅','일정 관리'],['orders','📦','발주 관리'],['chat','💬','1:1 채팅']]
+    :[['write','✏️','문의 작성'],['posts','📋','내 문의 현황'],['notices','📢','공지사항'],['schedule','📅','일정 관리'],['orders','📦','발주 신청'],['chat','💬','본사 채팅'],['frchat','🏪','가맹점 채팅']];
+  const hqPostSubItems=[['dashboard','📊','대시보드'],['resolved','✅','완료된 문의']];
+
+  const pendingOrderCount=isHQ?brandOrders.filter(o=>o.status==='검토중').length:0;
+
+  return (
+    <div className="min-h-screen flex flex-col md:flex-row bg-gray-50">
+      {dbError&&<div className="fixed top-0 left-0 right-0 z-50 bg-red-600 text-white text-sm px-4 py-3 flex items-center justify-between shadow-lg">
+        <span>{dbError}</span>
+        <button onClick={()=>setDbError('')} className="ml-4 text-white opacity-70 hover:opacity-100 text-lg leading-none">✕</button>
+      </div>}
+      {actionModal&&<ActionModal modal={actionModal} onClose={()=>setActionModal(null)} onConfirm={handlePostAction}/>}
+      {orderModal&&<OrderModal modal={orderModal} onClose={()=>setOrderModal(null)} onConfirm={handleOrderModalConfirm}/>}
+
+      {/* ── Sidebar ── */}
+      <aside className="sidebar-fixed w-full md:w-60 flex-shrink-0 flex flex-col" style={{backgroundColor:themeColor}}>
+        <div className="p-5 flex-1">
+          <div className="mb-5 flex items-center gap-2.5">
+            <span className="text-2xl">{isAdmin?'🛡️':currentUser.brandIcon}</span>
+            <div><div className="text-white font-bold text-sm leading-tight">{isAdmin?'시스템 관리':currentUser.brandName}</div><div className="text-white opacity-40 text-xs">소통 플랫폼</div></div>
+          </div>
+          <div className="rounded-xl p-3.5 mb-5" style={{backgroundColor:'rgba(255,255,255,0.12)'}}>
+            <div className="flex items-center gap-2.5 mb-1.5">
+              <div className="w-9 h-9 rounded-full flex items-center justify-center font-bold flex-shrink-0" style={{backgroundColor:'rgba(255,255,255,0.25)',color:'white'}}>{currentUser.name[0]}</div>
+              <div className="min-w-0"><div className="text-white font-semibold text-sm truncate">{currentUser.name}</div>{currentUser.storeName&&<div className="text-white opacity-70 text-xs">{currentUser.storeName}</div>}</div>
+            </div>
+            {currentUser.email&&<div className="text-white opacity-50 text-xs truncate">{currentUser.email}</div>}
+            <div className="mt-2"><span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{backgroundColor:'rgba(255,255,255,0.25)',color:'white'}}>{isAdmin?'슈퍼 관리자':isHQ?'본사 관리자':'가맹점'}</span></div>
+          </div>
+          <nav className="space-y-0.5">
+            {navItems.map(([key,icon,label])=>{
+              const isPostsGroup=isHQ&&key==='posts';
+              const isGroupParentActive=isPostsGroup&&['dashboard','resolved'].includes(activeNav);
+              const showSub=isPostsGroup&&(navGroupOpen||isGroupParentActive);
+              const badge=key==='posts'?(isHQ?pendingPosts.length:myActive.length):key==='orders'?pendingOrderCount:0;
+              const isActive=activeNav===key||isGroupParentActive;
+              return (
+                <div key={key}
+                     onMouseEnter={()=>isPostsGroup&&setNavGroupOpen(true)}
+                     onMouseLeave={()=>isPostsGroup&&setNavGroupOpen(false)}>
+                  <button className="w-full text-left px-3.5 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2"
+                    style={isActive?{backgroundColor:'rgba(255,255,255,0.22)',color:'white'}:{color:'rgba(255,255,255,0.65)'}}
+                    onClick={()=>setActiveNav(key)}>
+                    <span>{icon}</span><span className="flex-1">{label}</span>
+                    {badge>0&&<span className="text-xs rounded-full px-1.5 py-0.5 font-bold" style={{backgroundColor:'#f59e0b',color:'white'}}>{badge}</span>}
+                    {isPostsGroup&&<span className="text-xs opacity-40">{showSub?'▲':'▼'}</span>}
+                  </button>
+                  {showSub&&(
+                    <div className="ml-2 mt-0.5 space-y-0.5 pb-1">
+                      {hqPostSubItems.map(([sk,si,sl])=>(
+                        <button key={sk} className="w-full text-left pl-6 pr-3 py-1.5 rounded-xl text-sm flex items-center gap-2"
+                          style={activeNav===sk?{backgroundColor:'rgba(255,255,255,0.18)',color:'white'}:{color:'rgba(255,255,255,0.48)'}}
+                          onClick={()=>setActiveNav(sk)}>
+                          <span>{si}</span><span>{sl}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </nav>
+        </div>
+        <div className="p-4 border-t" style={{borderColor:'rgba(255,255,255,0.12)'}}>
+          <button className="w-full py-2 rounded-xl text-sm font-medium border transition-all"
+            style={{borderColor:'rgba(255,255,255,0.3)',color:'rgba(255,255,255,0.75)'}}
+            onMouseEnter={e=>e.currentTarget.style.backgroundColor='rgba(255,255,255,0.1)'}
+            onMouseLeave={e=>e.currentTarget.style.backgroundColor='transparent'}
+            onClick={handleLogout}>로그아웃</button>
+        </div>
+      </aside>
+
+      {/* ── Main ── */}
+      <main className="flex-1 overflow-auto">
+
+        {/* 가맹점: 문의 작성 */}
+        {!isHQ&&activeNav==='write'&&(
+          <Section title="새 문의 작성">
+            {postOk&&<div className="mb-4 flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 rounded-xl p-3.5 text-sm">✅ 문의가 접수되었습니다.</div>}
+            <div className="bg-white rounded-2xl shadow-sm p-6 space-y-5 max-w-2xl">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">카테고리</label>
+                <div className="flex flex-wrap gap-2">
+                  {CATEGORIES.map(cat=><button key={cat} className="px-4 py-1.5 rounded-full text-sm font-medium border-2 transition-all"
+                    style={newPost.category===cat?{backgroundColor:FR_COLOR,borderColor:FR_COLOR,color:'white'}:{borderColor:'#e5e7eb',color:'#6b7280'}}
+                    onClick={()=>setNewPost(p=>({...p,category:cat}))}>{cat}</button>)}
+                </div>
+              </div>
+              <Field label="제목"><input type="text" className="input-base" placeholder="문의 제목" value={newPost.title} onChange={e=>setNewPost(p=>({...p,title:e.target.value}))}/></Field>
+              <Field label="내용"><textarea className="input-base h-32 resize-none" placeholder="문의 내용" value={newPost.body} onChange={e=>setNewPost(p=>({...p,body:e.target.value}))}/></Field>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1.5">파일 첨부 <span className="text-gray-400 font-normal">(선택)</span></label>
+                <FileAttacher files={newPost.attachments} onChange={files=>setNewPost(p=>({...p,attachments:files}))} accentColor={FR_COLOR}/></div>
+              <button className="btn-primary w-full disabled:opacity-40" style={{backgroundColor:FR_COLOR}} disabled={!newPost.title||!newPost.body} onClick={handleSubmitPost}>문의 제출</button>
+            </div>
+          </Section>
+        )}
+
+        {/* 가맹점: 내 문의 현황 */}
+        {!isHQ&&activeNav==='posts'&&(
+          <Section title="내 문의 현황">
+            {myPosts.length===0?<Empty msg="아직 제출한 문의가 없습니다."/>:(
+              <div className="max-w-3xl space-y-6">
+                {myActive.length>0&&<div><SectionLabel label="검토 중" count={myActive.length} color="#92400e" bg="#fef3c7"/>
+                  <div className="space-y-3">{myActive.map(p=><FranchisePostCard key={p.id} post={p} expanded={expandedId===p.id} onToggle={()=>setExpandedId(expandedId===p.id?null:p.id)}/>)}</div></div>}
+                {myResolved.length>0&&<div><SectionLabel label="처리 완료" count={myResolved.length} color="#374151" bg="#f3f4f6"/>
+                  <div className="space-y-3">{myResolved.map(p=><FranchisePostCard key={p.id} post={p} expanded={expandedId===p.id} onToggle={()=>setExpandedId(expandedId===p.id?null:p.id)}/>)}</div></div>}
+              </div>
+            )}
+          </Section>
+        )}
+
+        {/* 본사: 대시보드 */}
+        {isHQ&&activeNav==='dashboard'&&(
+          <Section title="대시보드">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+              <StatCard label="전체 문의" value={summary.total} color={HQ_COLOR}/>
+              <StatCard label="검토 중" value={summary.unresolved} color="#d97706"/>
+              {CATEGORIES.map(c=><StatCard key={c} label={c} value={summary.byCategory[c]} color={CAT_COLORS[c]}/>)}
+            </div>
+            <div className="bg-white rounded-2xl shadow-sm p-6 max-w-2xl">
+              <h3 className="font-semibold text-gray-700 mb-4">카테고리별 비율</h3>
+              <div className="space-y-3">
+                {CATEGORIES.map(cat=>{const count=summary.byCategory[cat];const pct=summary.total?Math.round(count/summary.total*100):0;return(
+                  <div key={cat}><div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-600">{cat}</span><span className="text-gray-400">{count}건 ({pct}%)</span></div>
+                  <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{width:`${pct}%`,backgroundColor:CAT_COLORS[cat]}}/></div></div>
+                );})}
+              </div>
+              <div className="mt-5 pt-5 border-t border-gray-100">
+                <h4 className="font-medium text-gray-600 mb-3">처리 현황</h4>
+                <div className="flex gap-4 text-sm flex-wrap mb-3">
+                  {[['#f59e0b','검토중',summary.unresolved],['#16a34a','완료',summary.total-summary.unresolved-summary.rejected],['#ef4444','기각',summary.rejected]].map(([c,l,v])=>(
+                    <div key={l} className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full" style={{backgroundColor:c}}/><span className="text-gray-500">{l} {v}건</span></div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </Section>
+        )}
+
+        {/* 본사: 전체 문의 */}
+        {isHQ&&activeNav==='posts'&&(
+          <Section title="전체 문의 관리">
+            <FilterBar filters={filters} setFilters={setFilters} storeNames={storeNames} count={filteredPending.length}/>
+            {filteredPending.length===0?<Empty msg="검토 중인 문의가 없습니다." icon="✅"/>:(
+              <div className="space-y-3">
+                {filteredPending.map(p=><HQPostCard key={p.id} post={p} expanded={expandedId===p.id} onToggle={()=>setExpandedId(expandedId===p.id?null:p.id)} onAction={type=>setActionModal({type,post:p})}/>)}
+              </div>
+            )}
+          </Section>
+        )}
+
+        {/* 본사: 완료된 문의 */}
+        {isHQ&&activeNav==='resolved'&&(
+          <Section title="완료된 문의">
+            <FilterBar filters={filters} setFilters={setFilters} storeNames={storeNames} count={filteredResolved.length}/>
+            {filteredResolved.length===0?<Empty msg="처리 완료된 문의가 없습니다."/>:(
+              <div className="space-y-3">
+                {filteredResolved.map(p=><HQResolvedCard key={p.id} post={p} expanded={expandedId===p.id} onToggle={()=>setExpandedId(expandedId===p.id?null:p.id)} onDelete={handleDeletePost}/>)}
+              </div>
+            )}
+          </Section>
+        )}
+
+        {/* 공지사항 */}
+        {activeNav==='notices'&&(
+          <Section title="공지사항">
+            {isHQ&&(
+              <div className="bg-white rounded-2xl shadow-sm p-6 mb-5 max-w-2xl space-y-4">
+                <h3 className="font-semibold text-gray-700">새 공지 작성</h3>
+                {noticeOk&&<div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 rounded-xl p-3 text-sm">✅ 공지가 등록되었습니다.</div>}
+                <Field label="제목"><input type="text" className="input-base" placeholder="공지 제목" value={newNotice.title} onChange={e=>setNewNotice(n=>({...n,title:e.target.value}))}/></Field>
+                <Field label="내용"><textarea className="input-base h-28 resize-none" placeholder="공지 내용" value={newNotice.body} onChange={e=>setNewNotice(n=>({...n,body:e.target.value}))}/></Field>
+                <Field label="공지 대상">
+                  <select className="input-base" value={newNotice.target} onChange={e=>setNewNotice(n=>({...n,target:e.target.value}))}>
+                    <option value="전체">📢 전체 매장</option>
+                    {users.filter(u=>u.brandId===currentUser.brandId).map(u=><option key={u.id} value={u.storeName}>{u.storeName}</option>)}
+                  </select>
+                </Field>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1.5">파일 첨부 <span className="text-gray-400 font-normal">(선택)</span></label>
+                  <FileAttacher files={newNotice.attachments} onChange={files=>setNewNotice(n=>({...n,attachments:files}))} accentColor={HQ_COLOR}/></div>
+                <button className="btn-primary disabled:opacity-40" style={{backgroundColor:HQ_COLOR}} disabled={!newNotice.title||!newNotice.body} onClick={handleSubmitNotice}>공지 등록</button>
+              </div>
+            )}
+            <div className="space-y-3 max-w-3xl">
+              {brandNotices.length===0?<Empty msg="등록된 공지가 없습니다." icon="📢"/>:
+                brandNotices.map(n=><NoticeCard key={n.id} notice={n} expanded={noticeExpId===n.id} onToggle={()=>setNoticeExpId(noticeExpId===n.id?null:n.id)} onDelete={isHQ?handleDeleteNotice:null}/>)}
+            </div>
+          </Section>
+        )}
+
+        {/* 일정 관리 */}
+        {activeNav==='schedule'&&(
+          <Section title="일정 관리">
+            {isHQ&&(
+              <div className="max-w-2xl mb-5">
+                <button className="mb-4 px-4 py-2 rounded-xl text-sm font-medium text-white" style={{backgroundColor:HQ_COLOR}} onClick={()=>setShowEventForm(f=>!f)}>
+                  {showEventForm?'▲ 닫기':'+ 새 일정 추가'}
+                </button>
+                {showEventForm&&(
+                  <div className="bg-white rounded-2xl shadow-sm p-6 space-y-4 mb-4">
+                    {eventOk&&<div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 rounded-xl p-3 text-sm">✅ 일정이 등록되었습니다.</div>}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="col-span-2"><Field label="일정 제목"><input type="text" className="input-base" placeholder="예: 바리스타 교육" value={newEvent.title} onChange={e=>setNewEvent(v=>({...v,title:e.target.value}))}/></Field></div>
+                      <Field label="날짜"><input type="date" className="input-base" value={newEvent.date} onChange={e=>setNewEvent(v=>({...v,date:e.target.value}))}/></Field>
+                      <Field label="시간"><input type="time" className="input-base" value={newEvent.time} onChange={e=>setNewEvent(v=>({...v,time:e.target.value}))}/></Field>
+                      <div className="col-span-2"><Field label="장소"><input type="text" className="input-base" placeholder="장소" value={newEvent.location} onChange={e=>setNewEvent(v=>({...v,location:e.target.value}))}/></Field></div>
+                      <Field label="유형">
+                        <select className="input-base" value={newEvent.type} onChange={e=>setNewEvent(v=>({...v,type:e.target.value}))}>
+                          <option value="education">📚 교육</option>
+                          <option value="event">🎉 행사</option>
+                          <option value="meeting">🤝 미팅</option>
+                        </select>
+                      </Field>
+                      <Field label="대상">
+                        <select className="input-base" value={newEvent.target} onChange={e=>setNewEvent(v=>({...v,target:e.target.value}))}>
+                          <option value="전체">전체 매장</option>
+                          {users.filter(u=>u.brandId===currentUser.brandId).map(u=><option key={u.id} value={u.storeName}>{u.storeName}</option>)}
+                        </select>
+                      </Field>
+                    </div>
+                    <button className="btn-primary disabled:opacity-40" style={{backgroundColor:HQ_COLOR}} disabled={!newEvent.title||!newEvent.date} onClick={handleSubmitEvent}>일정 등록</button>
+                  </div>
+                )}
+              </div>
+            )}
+            <CalendarView events={brandEvents} currentUser={currentUser} onDeleteEvent={isHQ?handleDeleteEvent:null}/>
+          </Section>
+        )}
+
+        {/* 발주 시스템 */}
+        {activeNav==='orders'&&(
+          <Section title={isHQ?'발주 관리':'발주 신청'}>
+            {!isHQ&&(
+              <div className="bg-white rounded-2xl shadow-sm p-6 mb-5 max-w-2xl space-y-4">
+                <h3 className="font-semibold text-gray-700">새 발주 신청</h3>
+                {orderOk&&<div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 rounded-xl p-3 text-sm">✅ 발주가 접수되었습니다.</div>}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">발주 품목</label>
+                  <div className="space-y-2">
+                    {orderForm.items.map((it,i)=>(
+                      <div key={i} className="flex gap-2">
+                        <input className="input-base flex-1" placeholder="품목명" value={it.name} onChange={e=>{const items=[...orderForm.items];items[i]={...it,name:e.target.value};setOrderForm(f=>({...f,items}));}}/>
+                        <input className="input-base w-20" placeholder="수량" type="number" value={it.qty} onChange={e=>{const items=[...orderForm.items];items[i]={...it,qty:e.target.value};setOrderForm(f=>({...f,items}));}}/>
+                        <input className="input-base w-16" placeholder="단위" value={it.unit} onChange={e=>{const items=[...orderForm.items];items[i]={...it,unit:e.target.value};setOrderForm(f=>({...f,items}));}}/>
+                        {orderForm.items.length>1&&<button className="text-red-400 hover:text-red-600 px-1" onClick={()=>setOrderForm(f=>({...f,items:f.items.filter((_,j)=>j!==i)}))}>✕</button>}
+                      </div>
+                    ))}
+                  </div>
+                  <button className="mt-2 text-sm text-blue-500 hover:underline" onClick={()=>setOrderForm(f=>({...f,items:[...f.items,{name:'',qty:'',unit:''}]}))}>+ 품목 추가</button>
+                </div>
+                <Field label="비고 (선택)"><textarea className="input-base h-20 resize-none" placeholder="추가 요청사항" value={orderForm.note} onChange={e=>setOrderForm(f=>({...f,note:e.target.value}))}/></Field>
+                <button className="btn-primary disabled:opacity-40" style={{backgroundColor:FR_COLOR}}
+                  disabled={!orderForm.items.every(it=>it.name&&it.qty)} onClick={handleSubmitOrder}>발주 신청</button>
+              </div>
+            )}
+            {isHQ&&(
+              <div className="flex gap-2 mb-4 flex-wrap">
+                {['전체','검토중','승인','배송중','완료','거절'].map(s=>(
+                  <button key={s} className="px-3 py-1.5 rounded-xl text-sm font-medium border-2 transition-all"
+                    style={orderFilter===s?{backgroundColor:HQ_COLOR,borderColor:HQ_COLOR,color:'white'}:{borderColor:'#e5e7eb',color:'#6b7280'}}
+                    onClick={()=>setOrderFilter(s)}>{s}</button>
+                ))}
+              </div>
+            )}
+            <div className="space-y-3 max-w-3xl">
+              {(isHQ?brandOrders.filter(o=>orderFilter==='전체'||o.status===orderFilter):brandOrders).length===0
+                ?<Empty msg="발주 내역이 없습니다." icon="📦"/>
+                :(isHQ?brandOrders.filter(o=>orderFilter==='전체'||o.status===orderFilter):brandOrders).map(o=>(
+                  <OrderCard key={o.id} order={o} expanded={orderExpId===o.id} onToggle={()=>setOrderExpId(orderExpId===o.id?null:o.id)}
+                    isHQ={isHQ} onAction={handleOrderAction}/>
+                ))}
+            </div>
+          </Section>
+        )}
+
+        {/* 관리자: 계정 관리 */}
+        {isAdmin&&activeNav==='accounts'&&(
+          <Section title="전체 계정 관리">
+            <div className="space-y-6 max-w-4xl">
+              {brands.map(b=>{
+                const bUsers=users.filter(u=>u.brandId===b.id);
+                return (
+                  <div key={b.id} className="bg-white rounded-2xl shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 flex items-center gap-4" style={{backgroundColor:'#f8fafc',borderBottom:'1px solid #e2e8f0'}}>
+                      <span className="text-3xl">{b.icon}</span>
+                      <div className="flex-1">
+                        <h3 className="font-bold text-gray-800 text-lg">{b.name}</h3>
+                        <div className="flex flex-wrap gap-3 mt-1.5">
+                          <span className="text-xs text-gray-500">🏢 본사 ID: <code className="bg-white border border-gray-200 px-1.5 py-0.5 rounded text-gray-700">{b.hqId}</code> / <code className="bg-white border border-gray-200 px-1.5 py-0.5 rounded text-gray-700">{b.hqPassword}</code></span>
+                          <span className="text-xs text-gray-500">🔑 가맹점 코드: <code className="bg-white border border-gray-200 px-1.5 py-0.5 rounded text-gray-700">{b.id}</code> / <code className="bg-white border border-gray-200 px-1.5 py-0.5 rounded text-gray-700">{b.password}</code></span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        <div className="text-right">
+                          <div className="text-2xl font-bold text-gray-800">{bUsers.length}</div>
+                          <div className="text-xs text-gray-500">가맹점</div>
+                        </div>
+                        <button className="text-xs px-3 py-1.5 rounded-lg border text-red-400 border-red-200 hover:bg-red-50"
+                          onClick={()=>handleDeleteBrand(b.id)}>브랜드 삭제</button>
+                      </div>
+                    </div>
+                    <div className="p-4">
+                      {bUsers.length===0?<p className="text-sm text-gray-400 text-center py-4">등록된 가맹점이 없습니다.</p>:(
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-5 text-xs font-medium text-gray-400 px-3 py-1">
+                            <span>담당자</span><span>매장명</span><span>이메일</span><span>비밀번호</span><span>계정 ID</span>
+                          </div>
+                          {bUsers.map(u=>(
+                            <div key={u.id} className="grid grid-cols-5 items-center px-3 py-2.5 rounded-xl text-sm" style={{backgroundColor:'#f8fafc'}}>
+                              <div className="flex items-center gap-2"><div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0" style={{backgroundColor:FR_COLOR+'20',color:FR_COLOR}}>{u.name[0]}</div><span className="font-medium text-gray-800">{u.name}</span></div>
+                              <span className="text-gray-600">{u.storeName}</span>
+                              <span className="text-gray-400 text-xs truncate">{u.email}</span>
+                              <code className="text-xs bg-white border border-gray-200 px-1.5 py-0.5 rounded text-gray-700">{u.password}</code>
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-400 text-xs">#{u.id}</span>
+                                <button className="text-xs px-2 py-0.5 rounded border text-red-400 border-red-200 hover:bg-red-50" onClick={()=>handleDeleteUser(u.id)}>삭제</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Section>
+        )}
+
+        {/* 관리자: 채팅 모니터링 */}
+        {isAdmin&&activeNav==='chatmonitor'&&(
+          <Section title="채팅 모니터링">
+            {/* 탭 */}
+            <div className="flex gap-2 mb-4">
+              {[['hq','💬','본사 ↔ 가맹점'],['fr','🏪','가맹점 ↔ 가맹점']].map(([tab,icon,label])=>(
+                <button key={tab} className="px-4 py-2 rounded-xl text-sm font-medium border-2 transition-all"
+                  style={adminChatTab===tab?{backgroundColor:ADMIN_COLOR,borderColor:ADMIN_COLOR,color:'white'}:{borderColor:'#e5e7eb',color:'#6b7280'}}
+                  onClick={()=>{setAdminChatTab(tab);setAdminActiveChat(null);setAdminActiveFrChat(null);}}>
+                  {icon} {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex gap-4 max-w-5xl">
+              {/* 본사↔가맹점 */}
+              {adminChatTab==='hq'&&<>
+                <div className="w-64 flex-shrink-0 bg-white rounded-2xl shadow-sm overflow-hidden">
+                  <div className="px-4 py-3 border-b border-gray-100 text-sm font-semibold text-gray-700">전체 대화 {allChatConvos.length}건</div>
+                  <div className="overflow-y-auto" style={{maxHeight:'520px'}}>
+                    {allChatConvos.length===0?<p className="text-sm text-gray-400 text-center py-8">대화 내역이 없습니다.</p>:
+                      allChatConvos.map(c=>(
+                        <button key={c.key} className="w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors"
+                          style={adminActiveChat?.key===c.key?{backgroundColor:'#f0f4ff'}:{}}
+                          onClick={()=>setAdminActiveChat(c)}>
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <span className="text-sm">{c.brandIcon}</span>
+                            <span className="text-xs text-gray-400">{c.brandName}</span>
+                          </div>
+                          <div className="text-sm font-medium text-gray-800">{c.storeName}</div>
+                          {c.last&&<div className="text-xs text-gray-400 truncate mt-0.5">{c.last.text}</div>}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+                <div className="flex-1 bg-white rounded-2xl shadow-sm overflow-hidden" style={{minHeight:'500px'}}>
+                  {adminActiveChat?(
+                    <div className="flex flex-col h-full">
+                      <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2.5 flex-shrink-0">
+                        <span className="text-xl">{adminActiveChat.brandIcon}</span>
+                        <div><div className="font-semibold text-gray-800 text-sm">{adminActiveChat.storeName}</div><div className="text-xs text-gray-400">{adminActiveChat.brandName}</div></div>
+                        <span className="ml-auto text-xs px-2 py-0.5 rounded-full font-medium" style={{backgroundColor:'#fef3c7',color:'#92400e'}}>읽기 전용</span>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-5" style={{maxHeight:'450px'}}>
+                        {messages.filter(m=>m.brandId===adminActiveChat.brandId&&m.storeUserId===adminActiveChat.storeUserId)
+                          .map(m=><ChatBubble key={m.id} msg={m} isMine={m.sender==='hq'}/>)}
+                      </div>
+                    </div>
+                  ):(
+                    <div className="flex items-center justify-center h-full text-gray-400">
+                      <div className="text-center"><div className="text-4xl mb-3">💬</div><p className="text-sm">좌측에서 대화를 선택하세요.</p></div>
+                    </div>
+                  )}
+                </div>
+              </>}
+
+              {/* 가맹점↔가맹점 */}
+              {adminChatTab==='fr'&&<>
+                <div className="w-64 flex-shrink-0 bg-white rounded-2xl shadow-sm overflow-hidden">
+                  <div className="px-4 py-3 border-b border-gray-100 text-sm font-semibold text-gray-700">전체 대화 {allFrConvos.length}건</div>
+                  <div className="overflow-y-auto" style={{maxHeight:'520px'}}>
+                    {allFrConvos.length===0?<p className="text-sm text-gray-400 text-center py-8">대화 내역이 없습니다.</p>:
+                      allFrConvos.map(c=>(
+                        <button key={c.key} className="w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors"
+                          style={adminActiveFrChat?.key===c.key?{backgroundColor:'#f0fdf4'}:{}}
+                          onClick={()=>setAdminActiveFrChat(c)}>
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <span className="text-sm">{c.brandIcon}</span>
+                            <span className="text-xs text-gray-400">{c.brandName}</span>
+                          </div>
+                          <div className="text-sm font-medium text-gray-800">{c.store1} ↔ {c.store2}</div>
+                          {c.last&&<div className="text-xs text-gray-400 truncate mt-0.5">{c.last.text}</div>}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+                <div className="flex-1 bg-white rounded-2xl shadow-sm overflow-hidden" style={{minHeight:'500px'}}>
+                  {adminActiveFrChat?(
+                    <div className="flex flex-col h-full">
+                      <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2.5 flex-shrink-0">
+                        <span className="text-xl">{adminActiveFrChat.brandIcon}</span>
+                        <div><div className="font-semibold text-gray-800 text-sm">{adminActiveFrChat.store1} ↔ {adminActiveFrChat.store2}</div><div className="text-xs text-gray-400">{adminActiveFrChat.brandName}</div></div>
+                        <span className="ml-auto text-xs px-2 py-0.5 rounded-full font-medium" style={{backgroundColor:'#fef3c7',color:'#92400e'}}>읽기 전용</span>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-5" style={{maxHeight:'450px'}}>
+                        {frMessages.filter(m=>m.brandId===adminActiveFrChat.brandId&&((m.fromUserId===adminActiveFrChat.userId1&&m.toUserId===adminActiveFrChat.userId2)||(m.fromUserId===adminActiveFrChat.userId2&&m.toUserId===adminActiveFrChat.userId1)))
+                          .map(m=><ChatBubble key={m.id} msg={{...m,text:m.text,timestamp:m.timestamp}} isMine={m.fromUserId===adminActiveFrChat.userId1}/>)}
+                      </div>
+                    </div>
+                  ):(
+                    <div className="flex items-center justify-center h-full text-gray-400">
+                      <div className="text-center"><div className="text-4xl mb-3">🏪</div><p className="text-sm">좌측에서 대화를 선택하세요.</p></div>
+                    </div>
+                  )}
+                </div>
+              </>}
+            </div>
+          </Section>
+        )}
+
+        {/* 가맹점 채팅 */}
+        {!isHQ&&!isAdmin&&activeNav==='frchat'&&(
+          <Section title="가맹점 채팅">
+            <div className="flex gap-4 max-w-4xl">
+              <div className="w-48 flex-shrink-0 bg-white rounded-2xl shadow-sm overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100 text-sm font-semibold text-gray-700">같은 브랜드 매장</div>
+                <div>
+                  {peerStores.length===0
+                    ?<p className="text-sm text-gray-400 text-center py-6 px-3">같은 브랜드 매장이 없습니다.</p>
+                    :peerStores.map(s=>{
+                      const last=frMessages.filter(m=>m.brandId===currentUser.brandId&&((m.fromUserId===currentUser.id&&m.toUserId===s.id)||(m.fromUserId===s.id&&m.toUserId===currentUser.id))).sort((a,b)=>b.timestamp.localeCompare(a.timestamp))[0];
+                      return (
+                        <button key={s.id} className="w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors"
+                          style={activeFrStore?.id===s.id?{backgroundColor:'#f0fdf4'}:{}}
+                          onClick={()=>setActiveFrStore(s)}>
+                          <div className="text-sm font-medium text-gray-800">{s.storeName}</div>
+                          {last&&<div className="text-xs text-gray-400 truncate mt-0.5">{last.text}</div>}
+                        </button>
+                      );
+                    })
+                  }
+                </div>
+              </div>
+              <div className="flex-1 bg-white rounded-2xl shadow-sm overflow-hidden" style={{minHeight:'500px'}}>
+                {activeFrStore?(
+                  <FrChatWindow
+                    messages={myFrMessages.filter(m=>(m.fromUserId===currentUser.id&&m.toUserId===activeFrStore.id)||(m.fromUserId===activeFrStore.id&&m.toUserId===currentUser.id))}
+                    currentUserId={currentUser.id}
+                    toStore={activeFrStore}
+                    onSend={text=>handleSendFrMessage(text,activeFrStore.id,activeFrStore.storeName)}/>
+                ):(
+                  <div className="flex items-center justify-center h-full text-gray-400">
+                    <div className="text-center"><div className="text-4xl mb-3">🏪</div><p className="text-sm">좌측에서 매장을 선택하세요.</p></div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </Section>
+        )}
+
+        {/* 1:1 채팅 */}
+        {activeNav==='chat'&&(
+          <Section title="1:1 채팅">
+            {isHQ?(
+              <div className="flex gap-4 max-w-4xl">
+                <div className="w-48 flex-shrink-0 bg-white rounded-2xl shadow-sm overflow-hidden">
+                  <div className="px-4 py-3 border-b border-gray-100 text-sm font-semibold text-gray-700">매장 목록</div>
+                  <div>
+                    {chatStores.map(s=>(
+                      <button key={s.userId} className="w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors"
+                        style={activeChatStore?.userId===s.userId?{backgroundColor:'#eff6ff'}:{}}
+                        onClick={()=>setActiveChatStore(s)}>
+                        <div className="text-sm font-medium text-gray-800">{s.storeName}</div>
+                        {s.last&&<div className="text-xs text-gray-400 truncate mt-0.5">{s.last.text}</div>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex-1 bg-white rounded-2xl shadow-sm overflow-hidden" style={{minHeight:'500px'}}>
+                  {activeChatStore?(
+                    <ChatWindow messages={myMessages} storeUserId={activeChatStore.userId} senderRole="hq"
+                      title={`${activeChatStore.storeName} 채팅`}
+                      onSend={text=>handleSendMessage(text,activeChatStore.userId,activeChatStore.storeName)}/>
+                  ):(
+                    <div className="flex items-center justify-center h-full text-gray-400">
+                      <div className="text-center"><div className="text-4xl mb-3">💬</div><p className="text-sm">좌측에서 매장을 선택하세요.</p></div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ):(
+              <div className="max-w-2xl bg-white rounded-2xl shadow-sm overflow-hidden" style={{minHeight:'500px'}}>
+                <ChatWindow messages={myMessages} storeUserId={currentUser.id} senderRole="franchise"
+                  title="본사와의 채팅"
+                  onSend={text=>handleSendMessage(text,currentUser.id,currentUser.storeName)}/>
+              </div>
+            )}
+          </Section>
+        )}
+      </main>
+    </div>
+  );
+}
+
+/* ══════════ STYLES + MOUNT ══════════ */
+const s=document.createElement('style');
+s.textContent=`
+  .input-base{width:100%;border:1px solid #d1d5db;border-radius:0.75rem;padding:0.5rem 0.75rem;font-size:0.875rem;outline:none;transition:box-shadow 0.15s;}
+  .input-base:focus{box-shadow:0 0 0 2px rgba(59,130,246,0.3);border-color:#93c5fd;}
+  .btn-primary{padding:0.625rem 1rem;border-radius:0.75rem;color:white;font-weight:600;font-size:0.875rem;border:none;cursor:pointer;transition:opacity 0.15s;}
+  .btn-primary:hover:not(:disabled){opacity:0.87;}
+`;
+document.head.appendChild(s);
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
